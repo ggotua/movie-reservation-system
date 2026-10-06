@@ -15,7 +15,10 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi",
     "uvicorn",
-    "sqlalchemy>=2.0",
+    # NOTE: the `asyncio` extra pulls in greenlet, which sqlalchemy.ext.asyncio
+    # imports at load time. Plain "sqlalchemy>=2.0" installs without it, so
+    # every async engine import (src/db/engine.py, the seed, tests) fails.
+    "sqlalchemy[asyncio]>=2.0",
     "alembic",
     "psycopg[binary]",
     "pydantic>=2",
@@ -24,7 +27,11 @@ dependencies = [
     # original scaffold list but the config module cannot import without it.
     "pydantic-settings",
     "pyjwt",
-    "passlib[bcrypt]",
+    # NOTE: bcrypt is used directly (hashpw/checkpw) rather than through
+    # passlib — passlib's last release was 2020 and its bcrypt backend raises
+    # against bcrypt 5.x (see docs/steering/tech-stack.md, PROMPT 4b). Pinned
+    # below 6 so a future major cannot silently change the hash format.
+    "bcrypt>=5.0,<6",
     "pytest",
     "pytest-asyncio",
     "httpx",

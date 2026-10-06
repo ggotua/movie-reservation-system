@@ -26,6 +26,9 @@ UserRole = Literal["user", "admin"]
 
 USER_ROLES: tuple[UserRole, ...] = get_args(UserRole)
 DEFAULT_USER_ROLE: UserRole = "user"
+# The elevated role: created only by the seed script (src/db/seed.py), never
+# through the public API (docs/APP-OVERVIEW.md Section 2.1).
+ADMIN_USER_ROLE: UserRole = "admin"
 
 # --- reservations.status / seat_reservations.status (SPEC-1 2.8 / 2.9) -----
 ReservationStatus = Literal["held", "confirmed", "cancelled", "expired"]
