@@ -3,6 +3,12 @@
 Execute in Cursor Composer, in order. Each prompt is self-contained.
 SPEC-1.status is `approved` — implementation is authorized.
 
+NOTE: PROMPT 1 and PROMPT 4 below name `passlib[bcrypt]` and plain
+`sqlalchemy`. Both were corrected afterwards — see
+`PROMPT-4b-dependency-fixes.md` (passlib replaced by direct `bcrypt`,
+`sqlalchemy[asyncio]`). Kept as written here so the decision trail stays
+visible.
+
 Repo layout: `docs/`, `backend/`, `frontend/` at the repo root. File paths
 in the prompts below are relative to the repo root. Run all commands
 (pytest, alembic, python -m src.db.seed) from `backend/` with the venv

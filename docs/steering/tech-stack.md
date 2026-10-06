@@ -5,10 +5,10 @@
 | **Python 3.13** | Matches primary stack; team's existing tooling and habits. |
 | **FastAPI** | Async-native, typed request/response models via Pydantic, functional route handlers (no MVC-class ceremony) — fits functional-style preference. |
 | **PostgreSQL** | Reservation records need real ACID guarantees and row-level locking (`SELECT ... FOR UPDATE`) to prevent seat double-booking under concurrent requests — SQLite's write-locking model can't safely support this. |
-| **SQLAlchemy Core** (not ORM) | Data access as explicit, composable functions operating on `Table`/`select`/`insert` constructs, not model classes with hidden state and cascade magic — matches the functional-over-OOP preference. Constraints (uniqueness, foreign keys, cascades) are declared in the schema, not inferred from model relationships. |
+| **SQLAlchemy Core** (not ORM), installed as `sqlalchemy[asyncio]` (pulls in `greenlet`, which the async engine requires) | Data access as explicit, composable functions operating on `Table`/`select`/`insert` constructs, not model classes with hidden state and cascade magic — matches the functional-over-OOP preference. Constraints (uniqueness, foreign keys, cascades) are declared in the schema, not inferred from model relationships. |
 | **Alembic** | Schema migrations, versioned and reviewable — standard pairing with SQLAlchemy. |
 | **Pydantic v2** | Request/response validation and serialization; comes bundled with FastAPI. |
-| **PyJWT + passlib[bcrypt]** | JWT-based auth (stateless, no session store needed); bcrypt for password hashing — same reasoning as the SDD template's own security defaults. |
+| **PyJWT + bcrypt (used directly)** | JWT-based auth (stateless, no session store needed); bcrypt for password hashing. `bcrypt` is called directly (`hashpw` / `checkpw`, about ten lines) instead of through `passlib`: passlib's last release was in 2020 and its bcrypt backend fails against bcrypt 5.x (found in PROMPT 4). bcrypt rejects passwords longer than 72 bytes, so the auth module must validate a maximum password length of 72 bytes (UTF-8) before hashing. |
 | **pytest + httpx (ASGI test client)** | Unit and integration tests against the FastAPI app without a running server. |
 | **Docker Compose** | Postgres + app for reproducible local dev; avoids "works on my machine" for a project with real concurrency behavior to test. |
 | **ruff, mypy --strict, bandit, radon** | Automated Quality Score Gate per SDD workflow. |
