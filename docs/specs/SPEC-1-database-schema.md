@@ -155,7 +155,11 @@ CREATE TABLE reservations (
     confirmed_at TIMESTAMPTZ,
     cancelled_at TIMESTAMPTZ,
     CONSTRAINT reservations_status_check
-        CHECK (status IN ('held', 'confirmed', 'cancelled', 'expired'))
+        CHECK (status IN ('held', 'confirmed', 'cancelled', 'expired')),
+    -- Redundant with the primary key on purpose: it exists only so that
+    -- seat_reservations can reference (id, showtime_id) as one composite
+    -- foreign key (see 2.9 and FR-7).
+    CONSTRAINT reservations_id_showtime_unique UNIQUE (id, showtime_id)
 );
 CREATE INDEX idx_reservations_user ON reservations (user_id, created_at DESC);
 CREATE INDEX idx_reservations_showtime ON reservations (showtime_id, status);
@@ -175,12 +179,18 @@ confirmed within a reservation.
 ```sql
 CREATE TABLE seat_reservations (
     id             BIGSERIAL PRIMARY KEY,
-    reservation_id BIGINT NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+    reservation_id BIGINT NOT NULL,
     showtime_id    BIGINT NOT NULL REFERENCES showtimes(id) ON DELETE RESTRICT,
     seat_id        BIGINT NOT NULL REFERENCES seats(id) ON DELETE RESTRICT,
     status         TEXT NOT NULL DEFAULT 'held',
     CONSTRAINT seat_reservations_status_check
-        CHECK (status IN ('held', 'confirmed', 'cancelled', 'expired'))
+        CHECK (status IN ('held', 'confirmed', 'cancelled', 'expired')),
+    -- Composite FK: the denormalized showtime_id can never disagree with
+    -- the parent reservation's showtime_id (FR-7). Replaces the former
+    -- single-column reservation_id FK (Amendment 1).
+    CONSTRAINT seat_reservations_reservation_showtime_fk
+        FOREIGN KEY (reservation_id, showtime_id)
+        REFERENCES reservations (id, showtime_id) ON DELETE CASCADE
 );
 
 -- The core correctness guarantee: only one ACTIVE (held or confirmed) row
@@ -196,7 +206,15 @@ CREATE INDEX idx_seat_reservations_reservation ON seat_reservations (reservation
 `reservation_id → reservations.showtime_id`) specifically so the partial
 unique index above can be a single-table constraint. This is the one
 deliberate denormalization in the schema — flagged here per the DRY check
-(Section 9) rather than left implicit.
+(Section 9) rather than left implicit. The composite foreign key above is
+what keeps the duplicate honest: the database itself rejects any row whose
+`showtime_id` differs from its parent reservation's, so the uniqueness
+guarantee cannot be bypassed by a mislabeled row (FR-7).
+
+Not enforced by the database (deliberately, handled in SPEC-4): that
+`seat_id` belongs to the screen the showtime is scheduled on. Doing so
+would need `screen_id` copied onto more tables; the `reservations` module
+checks it inside the hold transaction instead.
 
 Cascade reasoning: `ON DELETE CASCADE` from `reservations` — a
 `seat_reservations` row has no independent meaning once its parent
@@ -276,6 +294,10 @@ Required tests (integration, against a real test Postgres instance):
 11. `test_reservation_cascade_deletes_seat_reservations`
 12. `test_migration_upgrade_and_downgrade` — Alembic `upgrade head` then
     `downgrade base` runs cleanly
+13. `test_seat_reservation_showtime_must_match_reservation` — with a
+    reservation for showtime A, inserting a `seat_reservations` row for
+    that reservation but with showtime B's id raises a DB integrity error;
+    the same insert with showtime A's id succeeds (FR-7)
 
 ---
 
@@ -297,6 +319,9 @@ Required tests (integration, against a real test Postgres instance):
         THE SYSTEM SHALL reject any value <= 0.
   FR-6  THE SYSTEM SHALL cascade-delete `seat_reservations` rows when
         their parent `reservations` row is deleted.
+  FR-7  IF a `seat_reservations` row's `showtime_id` differs from the
+        `showtime_id` of the reservation it belongs to, THE SYSTEM SHALL
+        reject the row with a database integrity error.
 
 ### 6.1 Requirements Mapping
 
@@ -307,7 +332,8 @@ Required tests (integration, against a real test Postgres instance):
 | FR-3 | Partial index `WHERE status IN ('held','confirmed')` excludes terminal states (2.9) |
 | FR-4 | `showtimes.movie_id` / `showtimes.screen_id` RESTRICT FKs (2.7) |
 | FR-5 | `showtimes_price_positive` CHECK constraint (2.7) |
-| FR-6 | `seat_reservations.reservation_id` CASCADE FK (2.9) |
+| FR-6 | `seat_reservations_reservation_showtime_fk` composite FK, `ON DELETE CASCADE` (2.9) |
+| FR-7 | `reservations_id_showtime_unique` (2.8) + `seat_reservations_reservation_showtime_fk` (2.9) |
 
 ### Equivalence Partitioning + Boundary Value Analysis
 
@@ -363,6 +389,7 @@ of these would be reasonable to hand-roll.
   the one intentional duplication in this schema — called out explicitly
   so it isn't mistaken for an oversight, and so no later SPEC "fixes" it
   by removing the column (which would break the uniqueness constraint).
+  The composite FK (2.9) guards the copy against drifting from its source.
 - Status enums (`held`/`confirmed`/`cancelled`/`expired`) are duplicated
   across `reservations.status` and `seat_reservations.status` by necessity
   (a reservation can have a mix of seat-level states during partial
@@ -393,6 +420,24 @@ about acceptable business timing/policy, it's application logic.**
 
 ---
 
+## Amendment Log
+
+**Amendment 1 (2026-10-06) — found while reviewing PROMPT 2 output, before
+any migration existed.**
+Problem: `seat_reservations.showtime_id` is a deliberate copy of
+`reservations.showtime_id`, but nothing forced the two to agree. A
+mislabeled row could sit under a different showtime and slip past the
+active-seat unique index, defeating the project's core guarantee at the
+database level.
+Change: add `UNIQUE (id, showtime_id)` on `reservations`; replace the
+single-column `reservation_id` FK on `seat_reservations` with the composite
+FK `(reservation_id, showtime_id)`. New FR-7 and test 13.
+Impact: schema only, no behavior change for correct code. Requires
+re-approval (SPEC-1.status reset to `planning`).
+
+---
+
 ## Implementation Status
 
-STATUS: NOT STARTED
+STATUS: NOT STARTED (tables.py drafted from the pre-amendment spec; being
+patched by PROMPT-1b)

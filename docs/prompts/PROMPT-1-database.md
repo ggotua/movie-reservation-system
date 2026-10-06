@@ -64,8 +64,8 @@ System exactly as specified in docs/specs/SPEC-1-database-schema.md
 (read this first — it is the authoritative schema, not a suggestion).
 
 IMPLEMENTER RULES — same as PROMPT 1, plus:
-9. Before writing any code, restate the 6 EARS acceptance criteria
-   (FR-1 through FR-6) from SPEC-1 Section 6 in your own words, one
+9. Before writing any code, restate the 7 EARS acceptance criteria
+   (FR-1 through FR-7) from SPEC-1 Section 6 in your own words, one
    sentence each. If anything is ambiguous, ask before implementing.
 10. Every table's constraints (CHECK, UNIQUE, partial unique index, FK
     ON DELETE behavior) must match SPEC-1 Section 2 exactly — this is not
@@ -159,7 +159,7 @@ Return the complete file.
 @workspace
 Create tests for the schema in backend/src/db/tables.py, covering every test
 listed in docs/specs/SPEC-1-database-schema.md Section 5, and asserting
-every EARS requirement (FR-1 through FR-6) in Section 6.
+every EARS requirement (FR-1 through FR-7) in Section 6.
 
 IMPLEMENTER RULES — same as PROMPT 1, plus:
 - Use a real Postgres test database (docker-compose db service or
@@ -178,7 +178,7 @@ IMPLEMENTER RULES — same as PROMPT 1, plus:
 Create file: backend/tests/integration/test_schema.py
 
 Requirements:
-- All 12 tests from SPEC-1 Section 5, named exactly as listed there
+- All 13 tests from SPEC-1 Section 5, named exactly as listed there
 - Each test that maps to an FR (see Section 6.1's Requirements Mapping)
   includes a comment noting which FR it verifies
 - pytest fixtures for: a clean test database per test (transaction
@@ -196,7 +196,7 @@ Return the complete file.
 1. `black`/`ruff format` + `mypy --strict` on every new file
 2. `docker compose up -d db`
 3. `alembic upgrade head`
-4. `pytest tests/integration/test_schema.py -v` — all 12 tests must pass
+4. `pytest tests/integration/test_schema.py -v` — all 13 tests must pass
 5. `python -m src.db.seed` then re-run it to confirm idempotency
 6. Verification with Evidence (SDD Step 4.7) for the two load-bearing
    tests specifically:
