@@ -1,0 +1,26 @@
+# Local development Postgres for the Movie Reservation System.
+#
+# The POSTGRES_* values below are non-functional placeholders and MUST match
+# the credentials baked into DATABASE_URL in backend/.env (see .env.example).
+# No real secrets are stored in this file.
+
+services:
+  db:
+    image: postgres:16
+    container_name: movie_reservation_db
+    environment:
+      POSTGRES_USER: movie_user
+      POSTGRES_PASSWORD: change_me_local_only
+      POSTGRES_DB: movie_reservation
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U movie_user -d movie_reservation"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db_data:

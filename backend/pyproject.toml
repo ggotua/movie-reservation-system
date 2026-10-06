@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "movie-reservation-system-backend"
+version = "0.1.0"
+description = "Backend service for the Movie Reservation System."
+requires-python = ">=3.13"
+
+# Backend dependencies. pytest / pytest-asyncio / httpx / ruff / mypy are
+# the test-and-quality-gate tooling; they live in this single list to match
+# the scaffold specification. All backend commands (venv, pytest, alembic,
+# uvicorn) are run from `backend/` and Python imports stay `src.<module>`.
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "psycopg[binary]",
+    "pydantic>=2",
+    # NOTE: pydantic-settings is required to use Pydantic v2 BaseSettings
+    # (the Settings class in src/core/config.py). It is not part of the
+    # original scaffold list but the config module cannot import without it.
+    "pydantic-settings",
+    "pyjwt",
+    "passlib[bcrypt]",
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "ruff",
+    "mypy",
+]
+
+# The importable package is the top-level `src/` directory (imports are
+# `src.core...`, `src.db...`), so exactly that tree is packaged.
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+# Imports are `src.<module>` with no per-package __init__.py files, so tell
+# mypy to treat `src/` as a package base (run from `backend/`) instead of
+# inferring a top-level module name per file.
+mypy_path = "."
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
