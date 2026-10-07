@@ -369,8 +369,9 @@ that boundary (an active status blocks; a terminal status doesn't).
 
 New dependencies introduced by this spec: `sqlalchemy` (Core only),
 `alembic`, `psycopg` (Postgres driver), `pytest`, `pytest-asyncio`,
-`testcontainers` (or a docker-compose test DB — see SPEC-1 implementation
-prompt for the choice).
+no `testcontainers` (decided: tests use a plain PostgreSQL server at
+`TEST_DATABASE_URL` — native locally, a service container in CI; see
+`steering/tech-stack.md`).
 
 All are actively maintained, widely used, permissively licensed (MIT/BSD),
 and each solves a problem substantial enough to justify the dependency

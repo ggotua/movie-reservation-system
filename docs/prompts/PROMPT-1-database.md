@@ -168,11 +168,31 @@ listed in docs/specs/SPEC-1-database-schema.md Section 5, and asserting
 every EARS requirement (FR-1 through FR-7) in Section 6.
 
 IMPLEMENTER RULES — same as PROMPT 1, plus:
-- Use a real Postgres test database (docker-compose db service or
-  testcontainers — your choice, but state which and why in a comment at
-  the top of the test file). Do NOT mock the database — these tests
-  exist specifically to prove DATABASE-level constraints work; a mock
-  would prove nothing.
+- Use a real Postgres test database. Do NOT mock the database — these
+  tests exist specifically to prove DATABASE-level constraints work; a
+  mock would prove nothing.
+- NO Docker and NO testcontainers in the tests (the developer's machine
+  cannot run virtualization; CI uses a GitHub Actions Postgres service
+  container). The tests connect to a plain PostgreSQL server at the URL in
+  the environment variable TEST_DATABASE_URL, read the same way
+  backend/src/db/seed.py reads its settings (pydantic-settings, reading
+  backend/.env and then real environment variables; fail loudly if unset).
+  State this choice in a comment at the top of the test file.
+- Safety guard: the migration test (test 12) runs `downgrade base`, which
+  drops every table. Before anything else runs, a session-scoped fixture
+  must REFUSE to proceed (raise, do not skip) unless the database name in
+  TEST_DATABASE_URL ends with "_test". Never point tests at DATABASE_URL.
+- Schema setup: a session-scoped fixture applies the real Alembic
+  migration (`alembic upgrade head`, programmatically via alembic.command)
+  to the test database, so every test also exercises migration 0001.
+  migrations/env.py reads DATABASE_URL through get_settings(); for the
+  Alembic calls, point it at TEST_DATABASE_URL by setting the DATABASE_URL
+  environment variable for the duration of the call (and clearing
+  get_settings' cache first if it is cached, then restoring both). Read
+  src/core/config.py before deciding how; do not edit migrations/env.py.
+- Test 12 must leave the schema at head when it finishes (downgrade base,
+  then upgrade head), and must not run while another test holds an open
+  transaction.
 - For test 9 (test_seat_reservation_unique_active_constraint) and test 10
   (test_seat_reservation_allows_new_hold_after_prior_cancelled): these
   two tests together are the acceptance test for this entire spec's
@@ -199,9 +219,11 @@ Return the complete file.
 
 ## After running all 5 prompts
 
-1. `black`/`ruff format` + `mypy --strict` on every new file
-2. `docker compose up -d db`
-3. `alembic upgrade head`
+1. `ruff format` + `ruff check` + `mypy --strict` on every new file
+2. Local PostgreSQL 16 (native Windows install, no Docker): databases
+   `movie_reservation` (dev) and `movie_reservation_test` (tests), user
+   `movie_user`; `backend/.env` gets DATABASE_URL and TEST_DATABASE_URL
+3. `alembic upgrade head` (dev database)
 4. `pytest tests/integration/test_schema.py -v` — all 13 tests must pass
 5. `python -m src.db.seed` then re-run it to confirm idempotency
 6. Verification with Evidence (SDD Step 4.7) for the two load-bearing

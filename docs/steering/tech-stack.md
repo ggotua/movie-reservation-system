@@ -10,7 +10,7 @@
 | **Pydantic v2** | Request/response validation and serialization; comes bundled with FastAPI. |
 | **PyJWT + bcrypt (used directly)** | JWT-based auth (stateless, no session store needed); bcrypt for password hashing. `bcrypt` is called directly (`hashpw` / `checkpw`, about ten lines) instead of through `passlib`: passlib's last release was in 2020 and its bcrypt backend fails against bcrypt 5.x (found in PROMPT 4). bcrypt rejects passwords longer than 72 bytes, so the auth module must validate a maximum password length of 72 bytes (UTF-8) before hashing. |
 | **pytest + httpx (ASGI test client)** | Unit and integration tests against the FastAPI app without a running server. |
-| **Docker Compose** | Postgres + app for reproducible local dev; avoids "works on my machine" for a project with real concurrency behavior to test. |
+| **PostgreSQL 16 (native locally) + GitHub Actions service container (CI)** | The developer's machine cannot run virtualization, so Docker is not available locally. Local development and tests use a native PostgreSQL 16 install (dev database `movie_reservation`, test database `movie_reservation_test`); CI runs the same tests against a `postgres:16` service container. Tests only need a connection string (`TEST_DATABASE_URL`), so the same suite runs in both places. `backend/docker-compose.yml` stays in the repo as an optional convenience for machines that can run Docker; nothing depends on it. |
 | **ruff, mypy --strict, bandit, radon** | Automated Quality Score Gate per SDD workflow. |
 
 ## Deliberate exclusions
