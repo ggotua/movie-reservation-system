@@ -370,7 +370,7 @@ that boundary (an active status blocks; a terminal status doesn't).
 New dependencies introduced by this spec: `sqlalchemy` (Core only),
 `alembic`, `psycopg` (Postgres driver), `pytest`, `pytest-asyncio`,
 no `testcontainers` (decided: tests use a plain PostgreSQL server at
-`TEST_DATABASE_URL` — native locally, a service container in CI; see
+`TEST_DATABASE_URL` — hosted Neon in development, a service container in CI; see
 `steering/tech-stack.md`).
 
 All are actively maintained, widely used, permissively licensed (MIT/BSD),

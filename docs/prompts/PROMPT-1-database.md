@@ -193,6 +193,17 @@ IMPLEMENTER RULES — same as PROMPT 1, plus:
 - Test 12 must leave the schema at head when it finishes (downgrade base,
   then upgrade head), and must not run while another test holds an open
   transaction.
+- The test database is a hosted Neon database, so every query is a network
+  round trip and the first connection after a pause can be slow. Keep the
+  number of round trips per test small (reuse one connection per test, no
+  per-row inserts in loops), and do not add retries or sleeps to hide a
+  slow connection; the URL carries connect_timeout=30.
+- Also update backend/.env.example: add TEST_DATABASE_URL with a placeholder
+  value (database name ending in _test), and replace the DATABASE_URL
+  comment that says it must point at the docker-compose db service with one
+  saying: hosted Postgres (Neon), direct non-pooled connection string,
+  postgresql+psycopg:// scheme, sslmode=require. Placeholders only, no real
+  host or password. Do not delete backend/docker-compose.yml.
 - For test 9 (test_seat_reservation_unique_active_constraint) and test 10
   (test_seat_reservation_allows_new_hold_after_prior_cancelled): these
   two tests together are the acceptance test for this entire spec's
@@ -220,9 +231,10 @@ Return the complete file.
 ## After running all 5 prompts
 
 1. `ruff format` + `ruff check` + `mypy --strict` on every new file
-2. Local PostgreSQL 16 (native Windows install, no Docker): databases
-   `movie_reservation` (dev) and `movie_reservation_test` (tests), user
-   `movie_user`; `backend/.env` gets DATABASE_URL and TEST_DATABASE_URL
+2. Neon (hosted Postgres, no Docker): databases `movie_reservation` (dev)
+   and `movie_reservation_test` (tests); `backend/.env` gets DATABASE_URL
+   and TEST_DATABASE_URL (direct, non-pooled connection strings,
+   `postgresql+psycopg://`, `sslmode=require`, `connect_timeout=30`)
 3. `alembic upgrade head` (dev database)
 4. `pytest tests/integration/test_schema.py -v` — all 13 tests must pass
 5. `python -m src.db.seed` then re-run it to confirm idempotency
