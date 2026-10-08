@@ -1,0 +1,87 @@
+# Continuous integration for the Movie Reservation System backend.
+#
+# Runs the quality gates (ruff format check, ruff lint, mypy --strict) and the
+# SPEC-1 database-constraint integration tests on every push and pull request.
+#
+# The database is a throwaway `postgres:16` service container, so CI never
+# touches the internet-hosted Neon database and also proves the schema works on
+# PostgreSQL 16 (Neon dev/test runs PostgreSQL 18 — the schema must stay free of
+# version-specific features; see docs/specs/SPEC-1-database-schema.md).
+#
+# All credentials in this file are throwaway, CI-only values: the service
+# container is destroyed when the run ends, so they protect nothing and are not
+# secrets. Real credentials (Neon connection strings) are NEVER used here and are
+# never added to GitHub secrets for this workflow. The database name ends in
+# `_test` so the safety guard in backend/tests/conftest.py accepts it.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Throwaway, CI-only values (not secrets) — see the header comment.
+      # `Settings` (src/core/config.py) requires DATABASE_URL and JWT_SECRET to
+      # import cleanly; the tests themselves read TEST_DATABASE_URL only.
+      TEST_DATABASE_URL: postgresql+psycopg://ci_user:ci_password_not_a_secret@localhost:5432/movie_reservation_test
+      DATABASE_URL: postgresql+psycopg://ci_user:ci_password_not_a_secret@localhost:5432/movie_reservation_test
+      JWT_SECRET: ci-only-jwt-secret-not-a-secret-0123456789abcdef
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password_not_a_secret
+          POSTGRES_DB: movie_reservation_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install the backend (editable)
+        run: pip install -e .
+
+      - name: Check formatting (ruff format --check)
+        run: ruff format --check src tests
+
+      - name: Lint (ruff check)
+        run: ruff check src tests
+
+      - name: Type check (mypy --strict)
+        run: mypy --strict src tests
+
+      - name: Run tests (pytest)
+        run: python -m pytest tests -v
