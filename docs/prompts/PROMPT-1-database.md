@@ -178,6 +178,11 @@ IMPLEMENTER RULES — same as PROMPT 1, plus:
   backend/src/db/seed.py reads its settings (pydantic-settings, reading
   backend/.env and then real environment variables; fail loudly if unset).
   State this choice in a comment at the top of the test file.
+- Use a SYNCHRONOUS SQLAlchemy engine (`create_engine` with the
+  `postgresql+psycopg://` URL) and plain sync pytest tests/fixtures. These
+  tests only prove database constraints; async adds nothing here, and on
+  Windows async psycopg fails under the default ProactorEventLoop (see
+  PROMPT-4c). Do not use pytest-asyncio or AsyncEngine in this file.
 - Safety guard: the migration test (test 12) runs `downgrade base`, which
   drops every table. Before anything else runs, a session-scoped fixture
   must REFUSE to proceed (raise, do not skip) unless the database name in

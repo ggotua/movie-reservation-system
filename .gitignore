@@ -47,3 +47,4 @@ pnpm-debug.log*
 Thumbs.db
 
 *.zip
+.neon

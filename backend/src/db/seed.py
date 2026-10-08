@@ -29,6 +29,7 @@ the script therefore creates no duplicate rows and raises no error.
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import bcrypt
 from pydantic import Field, field_validator
@@ -286,4 +287,10 @@ async def run_seed() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(run_seed())
+    if sys.platform == "win32":
+        # Python on Windows defaults to the ProactorEventLoop, but async psycopg
+        # refuses to run on it ("Psycopg cannot use the 'ProactorEventLoop' to
+        # run in async mode"); it needs a SelectorEventLoop instead.
+        asyncio.run(run_seed(), loop_factory=asyncio.SelectorEventLoop)
+    else:
+        asyncio.run(run_seed())
