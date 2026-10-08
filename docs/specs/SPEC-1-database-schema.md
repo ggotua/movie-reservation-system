@@ -440,5 +440,53 @@ re-approval (SPEC-1.status reset to `planning`).
 
 ## Implementation Status
 
-STATUS: NOT STARTED (tables.py drafted from the pre-amendment spec; being
-patched by PROMPT-1b)
+STATUS: IMPLEMENTED AND VERIFIED (2026-10-08)
+
+Delivered (all under `backend/`): `pyproject.toml`, `src/core/{config,enums}.py`,
+`src/db/{engine,tables,seed}.py`, `alembic.ini`, `migrations/env.py`,
+`migrations/versions/0001_initial_schema.py`, `.env.example`,
+`tests/conftest.py`, `tests/integration/test_schema.py`.
+
+Verification with Evidence (against hosted Neon, database `movie_reservation_test`):
+
+```
+Claim:     Two active holds for the same seat/showtime cannot coexist, and a
+           cancelled hold does not block a new one (FR-2, FR-3)
+Command:   pytest tests/integration/test_schema.py -k "seat_reservation_unique_active or allows_new_hold_after_prior_cancelled" -v
+Exit code: 0
+Summary:   2 passed, 11 deselected
+Verdict:   PASS
+
+Claim:     The full schema suite proves FR-1 through FR-7 (13 tests)
+Command:   python -m pytest tests/integration/test_schema.py -v
+Exit code: 0
+Summary:   13 passed, 3 warnings (alembic prepend_sys_path deprecation)
+Verdict:   PASS
+
+Claim:     Code quality gates are clean
+Command:   ruff format --check src tests; ruff check src tests; mypy --strict src tests
+Exit code: 0 / 0 / 0
+Summary:   7 files formatted; all checks passed; no mypy issues in 7 files
+Verdict:   PASS
+
+Claim:     Seed is idempotent and produces the expected rows on the dev DB
+Command:   python -m src.db.seed (twice), then count of screens/seats/users
+Exit code: 0
+Summary:   (2, 152, 1)
+Verdict:   PASS
+```
+
+Deviations from the original plan (all documented before code):
+- Amendment 1 (composite FK) — PROMPT-1b.
+- passlib replaced by direct bcrypt; `sqlalchemy[asyncio]` — PROMPT-4b.
+- Windows event-loop fix in the seed entry point — PROMPT-4c.
+- No Docker/testcontainers: hosted Neon for dev and test; GitHub Actions
+  postgres:16 service container planned for CI (tests are sync SQLAlchemy).
+
+Known follow-ups (not blockers):
+- `alembic.ini`: add `path_separator = os` to silence the DeprecationWarning.
+- Dev/test run on Neon PostgreSQL 18, CI on postgres:16 — keep the schema free
+  of version-specific features.
+- CI workflow (GitHub Actions) not yet written.
+- Move DB fixtures to `tests/integration/conftest.py` when DB-less
+  `tests/unit/` tests are added.
