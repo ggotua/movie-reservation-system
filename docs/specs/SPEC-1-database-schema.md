@@ -483,10 +483,14 @@ Deviations from the original plan (all documented before code):
 - No Docker/testcontainers: hosted Neon for dev and test; GitHub Actions
   postgres:16 service container planned for CI (tests are sync SQLAlchemy).
 
-Known follow-ups (not blockers):
-- `alembic.ini`: add `path_separator = os` to silence the DeprecationWarning.
+CI evidence (2026-10-08): GitHub Actions workflow `CI` (`postgres:16` service
+container; ruff format/check, mypy --strict, pytest) ran green on push, so the
+schema and all 13 tests also pass on PostgreSQL 16 (PROMPT-6).
+
+Follow-ups:
+- DONE: `alembic.ini` `path_separator = os` (PROMPT-6).
+- DONE: CI workflow (PROMPT-6).
 - Dev/test run on Neon PostgreSQL 18, CI on postgres:16 — keep the schema free
   of version-specific features.
-- CI workflow (GitHub Actions) not yet written.
 - Move DB fixtures to `tests/integration/conftest.py` when DB-less
   `tests/unit/` tests are added.

@@ -12,9 +12,11 @@ Notes:         The seat-uniqueness constraint designed here is what
                SPEC-4 depends on for correctness — gets extra scrutiny.
 
 ### SPEC-2: Auth & Roles
-Description:   Signup, login, JWT issuance, `get_current_user` /
-               `require_admin` dependencies, admin promotion endpoint,
-               seed script for the first admin
+Description:   FastAPI app skeleton (app factory, DB connection dependency,
+               standard error shape), signup, login, JWT issuance,
+               `get_current_user` / `require_admin` dependencies, admin
+               promotion endpoint, shared password hashing (seed script
+               reuses it)
 Dependencies:  SPEC-1 (users table)
 Complexity:    Medium
 
