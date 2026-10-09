@@ -21,7 +21,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "alembic",
     "psycopg[binary]",
-    "pydantic>=2",
+    "pydantic[email]>=2",
     # NOTE: pydantic-settings is required to use Pydantic v2 BaseSettings
     # (the Settings class in src/core/config.py). It is not part of the
     # original scaffold list but the config module cannot import without it.

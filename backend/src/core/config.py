@@ -6,8 +6,10 @@ and validated by :class:`Settings`; access them through :func:`get_settings`.
 
 Fail-loud behaviour: ``DATABASE_URL`` and ``JWT_SECRET`` are declared with
 no default, so importing :func:`get_settings` (and therefore any module that
-depends on it) raises immediately when either is unset or blank. A
-misconfigured deployment must not start silently.
+depends on it) raises immediately when either is unset or blank. In addition,
+``JWT_SECRET`` must be at least 32 characters long: a shorter non-blank value
+is rejected for the same reason (a weak signing key must not start silently).
+A misconfigured deployment must not start silently.
 """
 
 from __future__ import annotations
@@ -29,7 +31,8 @@ class Settings(BaseSettings):
             (e.g. ``postgresql+psycopg://user:pass@host:5432/dbname``). No
             default: it carries credentials and must be provided explicitly.
         jwt_secret: Secret used to sign and verify JWTs. No default, so a
-            missing or blank value fails loudly at startup.
+            missing or blank value fails loudly at startup; it must also be at
+            least 32 characters long (SPEC-2 FR-10).
         jwt_expiry_minutes: JWT lifetime in minutes. Must be greater than 0.
         seat_hold_expiry_minutes: How long a seat hold stays active before
             it expires, in minutes. Must be greater than 0.
@@ -67,6 +70,28 @@ class Settings(BaseSettings):
         """
         if not value.strip():
             raise ValueError("must not be blank")
+        return value
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _require_minimum_secret_length(cls, value: str) -> str:
+        """Reject a ``JWT_SECRET`` shorter than 32 characters (SPEC-2 FR-10).
+
+        A short signing key is brute-forceable, so a non-blank value below the
+        minimum stops startup rather than being silently accepted. Blankness is
+        left to :meth:`_reject_blank` so its message is unchanged.
+
+        Args:
+            value: The raw ``JWT_SECRET`` value supplied via the environment.
+
+        Returns:
+            str: The unchanged value when it is blank or at least 32 characters.
+
+        Raises:
+            ValueError: If ``value`` is non-blank and shorter than 32 characters.
+        """
+        if value.strip() and len(value) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 characters")
         return value
 
 

@@ -14,7 +14,8 @@ Usage::
 
 The admin credential is read from the ``SEED_ADMIN_EMAIL`` and
 ``SEED_ADMIN_PASSWORD`` environment variables (or ``backend/.env`` when
-running from ``backend/``) and is hashed with bcrypt before it is stored, so
+running from ``backend/``) and is hashed with the shared
+:func:`src.core.security.hash_password` before it is stored (SPEC-2 FR-11), so
 no secret ever appears in source (IMPLEMENTER RULES, rule 7).
 
 Idempotency: every write is an ``INSERT ... ON CONFLICT DO NOTHING`` keyed on
@@ -31,14 +32,15 @@ from __future__ import annotations
 import asyncio
 import sys
 
-import bcrypt
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import Insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.core.enums import ADMIN_USER_ROLE
-from src.db.engine import async_session_factory, engine
+from src.core.security import hash_password, normalize_email
+from src.db.engine import engine
 from src.db.tables import screens, seats, users
 
 # The screens to seed, as (name, rows, seats_per_row). Row labels are derived
@@ -48,37 +50,39 @@ _SCREEN_SPECS: tuple[tuple[str, int, int], ...] = (
     ("Screen 2", 6, 12),
 )
 
-# bcrypt is the project's password-hashing algorithm (docs/steering/tech-stack.md)
-# and is called directly: hashpw/checkpw are the whole API, so the passlib
-# wrapper added no value and its backend raises against bcrypt 5.x.
-#
-# TEMPORARY DUPLICATION — flagged for the DRY check in
-# docs/steering/principles.md: SPEC-2 (auth) does not exist yet, so this is the
-# only password-hashing code in the codebase. When SPEC-2 lands, hashing moves
-# to a shared module under ``src/core/`` (docs/steering/conventions.md groups
-# hashing there) and is imported by both the auth module and this seed. The
-# algorithm and work factor must stay identical, otherwise a hash created by
-# this seed would stop verifying at login.
+# SPEC-2 Section 2.3 password policy, applied to the seed credential so a
+# misconfigured admin password fails loudly instead of being stored. The auth
+# module will own the authoritative check (``validate_password``); this local
+# copy exists only because that module does not exist yet and ``db`` must not
+# depend on ``auth`` (SPEC-2 Section 11.1).
+_MIN_PASSWORD_CHARS = 8
+_MAX_PASSWORD_BYTES = 72
 
 
-def _hash_password(password: str) -> str:
-    """Hash a plain-text password with bcrypt, generating a fresh salt.
+def _validate_seed_password(password: str) -> None:
+    """Fail loudly when the seed admin password violates SPEC-2's policy.
+
+    SPEC-2 Section 2.3 requires a password of at least 8 characters and at
+    most 72 bytes in UTF-8. :func:`~src.core.security.hash_password` already
+    rejects input over 72 bytes, but checking here gives the seed a clear,
+    credential-specific message for both cases. Once the auth module exists,
+    SPEC-2's ``validate_password`` becomes the single authoritative check.
 
     Args:
-        password: The plain-text password to hash. It is UTF-8 encoded first,
-            because bcrypt operates on bytes.
+        password: The plain-text ``SEED_ADMIN_PASSWORD`` value.
 
     Returns:
-        str: The bcrypt hash, ASCII-encoded (e.g. ``$2b$12$...``), ready for
-        ``users.password_hash``.
+        None.
 
     Raises:
-        ValueError: If the UTF-8 encoded password is longer than 72 bytes.
-            bcrypt 5.x rejects such input instead of truncating it
-            (docs/steering/tech-stack.md), so SPEC-2's request validation must
-            cap the password length at 72 bytes before calling this function.
+        ValueError: If ``password`` is shorter than 8 characters or longer
+            than 72 bytes in UTF-8. The message names the environment variable,
+            never the supplied value.
     """
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+    if len(password) < _MIN_PASSWORD_CHARS:
+        raise ValueError("SEED_ADMIN_PASSWORD must be at least 8 characters")
+    if len(password.encode("utf-8")) > _MAX_PASSWORD_BYTES:
+        raise ValueError("SEED_ADMIN_PASSWORD must be at most 72 bytes in UTF-8")
 
 
 class _SeedSettings(BaseSettings):
@@ -239,49 +243,89 @@ def _seats_statement(seat_rows: list[dict[str, int | str]]) -> Insert:
     )
 
 
+async def seed_database(
+    conn: AsyncConnection,
+    admin_email: str,
+    admin_password: str,
+) -> None:
+    """Seed the admin account, the two screens and their seats.
+
+    Infrastructure-free: it takes an already-open async connection plus the
+    credentials, reads no settings or environment, opens no engine and commits
+    nothing — the caller owns the transaction. That is what lets a test run the
+    exact seeding logic against ``TEST_DATABASE_URL`` without any risk of
+    touching the development database (SPEC-2 Section 4).
+
+    Every insert is ``ON CONFLICT DO NOTHING`` keyed on a natural unique
+    constraint, so the function is idempotent: calling it twice inserts nothing
+    the second time and raises nothing. The admin email is stored normalized
+    (stripped, lowercased) and only the bcrypt hash of the password is written.
+
+    Args:
+        conn: An open :class:`~sqlalchemy.ext.asyncio.AsyncConnection`. The
+            caller owns the surrounding transaction and the commit.
+        admin_email: The first admin's email (``SEED_ADMIN_EMAIL``); it is
+            passed through :func:`~src.core.security.normalize_email`.
+        admin_password: The first admin's plain-text password; it is validated
+            against SPEC-2's policy and hashed with
+            :func:`~src.core.security.hash_password`.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If ``admin_password`` is shorter than 8 characters or
+            longer than 72 bytes in UTF-8 (see :func:`_validate_seed_password`).
+    """
+    _validate_seed_password(admin_password)
+    normalized_email = normalize_email(admin_email)
+    password_hash = hash_password(admin_password)
+
+    # 1. Exactly one admin user.
+    await conn.execute(_admin_user_statement(normalized_email, password_hash))
+
+    # 2. Each screen, then its seats. The id is re-read on every run because
+    #    ON CONFLICT DO NOTHING returns no row when the screen already exists.
+    for name, rows, seats_per_row in _SCREEN_SPECS:
+        await conn.execute(_screen_statement(name, rows, seats_per_row))
+        screen_id = (
+            await conn.execute(select(screens.c.id).where(screens.c.name == name))
+        ).scalar_one()
+        await conn.execute(_seats_statement(_seat_rows(screen_id, rows, seats_per_row)))
+
+
 async def run_seed() -> None:
-    """Seed the first admin account, the two screens and their seats.
+    """CLI entry point: read credentials, seed inside one transaction, commit.
 
-    Runs everything in a single transaction so a failure part-way through leaves
-    the database untouched. Every insert is ``ON CONFLICT DO NOTHING`` keyed on
-    a natural unique constraint, so the function is idempotent: calling it twice
-    inserts nothing the second time and does not raise.
-
-    The admin password is read from the environment, hashed here with bcrypt,
-    and only the hash is written to ``users.password_hash``.
+    Reads ``SEED_ADMIN_EMAIL`` / ``SEED_ADMIN_PASSWORD`` through
+    :class:`_SeedSettings` (fails loudly when either is unset or blank), opens
+    one connection bound to the module engine with a transaction, delegates all
+    seeding work to :func:`seed_database`, and commits when that returns. If
+    anything raises, the transaction is rolled back and the database is left
+    untouched.
 
     Side effects: opens and commits one database transaction, and disposes the
     process-wide async engine (``src.db.engine.engine``) before returning so a
     short-lived CLI process exits without leaving pooled connections open.
 
+    Returns:
+        None.
+
     Raises:
         pydantic.ValidationError: If ``SEED_ADMIN_EMAIL`` or
             ``SEED_ADMIN_PASSWORD`` is unset or blank — the seed fails loudly
             rather than creating an account with a default credential.
+        ValueError: If the password violates SPEC-2's length policy.
     """
     settings = _SeedSettings()  # Fails loudly here if either variable is unset.
-    password_hash = _hash_password(settings.seed_admin_password)
 
     try:
-        async with async_session_factory() as session, session.begin():
-            # 1. Exactly one admin user.
-            await session.execute(
-                _admin_user_statement(settings.seed_admin_email, password_hash)
+        async with engine.begin() as conn:
+            await seed_database(
+                conn,
+                settings.seed_admin_email,
+                settings.seed_admin_password,
             )
-
-            # 2. Each screen, then its seats. The id is re-read on every run
-            #    because ON CONFLICT DO NOTHING returns no row when the
-            #    screen already exists.
-            for name, rows, seats_per_row in _SCREEN_SPECS:
-                await session.execute(_screen_statement(name, rows, seats_per_row))
-                screen_id = (
-                    await session.execute(
-                        select(screens.c.id).where(screens.c.name == name)
-                    )
-                ).scalar_one()
-                await session.execute(
-                    _seats_statement(_seat_rows(screen_id, rows, seats_per_row))
-                )
     finally:
         await engine.dispose()
 

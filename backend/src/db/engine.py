@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
@@ -69,3 +70,33 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     """
     async with async_session_factory() as session:
         yield session
+
+
+async def get_connection() -> AsyncIterator[AsyncConnection]:
+    """Yield a database connection wrapped in one request-scoped transaction.
+
+    Intended for use as a FastAPI dependency. ``engine.begin()`` starts a
+    transaction and commits it when the route and all its dependencies returned
+    normally, and rolls back when an exception reaches this generator
+    (SPEC-2 Section 2.7). Exceptions are deliberately not caught here, so the
+    rollback and the API's error handling both stay in FastAPI's hands.
+
+    Commit timing (important): FastAPI runs a yield-dependency's exit code
+    *after* the response has been sent unless the dependency is declared with
+    ``scope="function"``. The commit must be visible before the client receives
+    the response, otherwise a follow-up request can miss the data this request
+    just wrote. Routes must therefore wire this dependency as
+    ``Depends(get_connection, scope="function")``. FastAPI 0.142.2 supports that
+    keyword; without it the default ``scope="request"`` applies and the commit
+    happens only after the response has gone out.
+
+    Yields:
+        AsyncConnection: A connection bound to a transaction that is committed
+        on success and rolled back on error.
+
+    Side effects:
+        Opens one pooled connection and one transaction per request, held until
+        the dependency's exit code runs.
+    """
+    async with engine.begin() as connection:
+        yield connection
