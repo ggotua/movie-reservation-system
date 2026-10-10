@@ -230,7 +230,7 @@ MVP is complete when:
 
 - SPEC-1: Data Model & Relationships ✅ IMPLEMENTED (2026-10-08)
 - SPEC-2: Auth & Roles ✅ IMPLEMENTED (2026-10-10)
-- SPEC-3: Movie & Showtime Management ⏳ PENDING
+- SPEC-3: Movie & Showtime Management 📝 PLANNING (spec drafted, awaiting approval)
 - SPEC-4: Seat Reservation Engine (hold/confirm/expire) ⏳ PENDING
 - SPEC-5: Reservation Lifecycle for Users (view/cancel) ⏳ PENDING
 - SPEC-6: Admin Reporting (capacity/revenue) ⏳ PENDING
