@@ -387,4 +387,74 @@ depend on `auth.dependencies` only, never on `auth.service` internals.
 
 ## Implementation Status
 
-STATUS: NOT STARTED (awaiting approval; see SPEC-2.status)
+STATUS: IMPLEMENTED AND VERIFIED (2026-10-10)
+
+Delivered (under `backend/`): `src/core/{errors,security}.py` and the JWT secret
+rule in `src/core/config.py`; `src/db/engine.py` (`get_connection`,
+`DbConnection`); `src/auth/{service,schemas,dependencies,router}.py`;
+`src/main.py`; seed refactor (`seed_database`, shared hashing) in
+`src/db/seed.py`; `pydantic[email]` dependency; tests in
+`tests/unit/{test_security,test_config_jwt_secret,test_auth_policy}.py`,
+`tests/integration/test_auth_api.py` (tests 12-29) and the async
+infrastructure in `tests/conftest.py`. Prompts: `docs/prompts/PROMPT-2-auth.md`.
+
+Verification with Evidence:
+
+```
+Claim:     Signup, login, JWT, role checks and promotion satisfy FR-1..FR-12
+Command:   python -m pytest -q   (from backend/, TEST_DATABASE_URL = Neon *_test)
+Exit code: 0
+Summary:   42 passed in 58.28s  (13 schema + 11 unit + 18 auth API)
+Verdict:   PASS
+
+Claim:     Code quality gates are clean
+Command:   ruff format --check src tests; ruff check src tests; mypy --strict src tests
+Exit code: 0 / 0 / 0
+Summary:   18 files formatted; all checks passed; no issues in 18 source files
+Verdict:   PASS
+
+Claim:     Same suite passes on Linux against PostgreSQL 16 (CI)
+Command:   GitHub Actions workflow CI, run #2 (commit 497826f)
+Exit code: success
+Summary:   completed successfully in 1m 2s
+Verdict:   PASS
+
+Claim:     A write is committed before the response is returned, and the real
+           server works on Windows (SelectorEventLoop)
+Command:   python -m src.main, then signup -> immediate login -> /auth/me
+           against the Neon dev database (manual smoke test)
+Exit code: n/a (HTTP 201 / 200 / 200)
+Summary:   login right after signup found the new user; duplicate signup ->
+           409 EMAIL_ALREADY_REGISTERED; non-admin promote -> 403 FORBIDDEN
+Verdict:   PASS
+
+Claim:     A promotion applies to the target's existing token (FR-6, FR-9)
+Command:   seed admin promotes user 2; user 2's older token then calls an
+           admin-only route
+Summary:   200, role admin (also covered by test 26)
+Verdict:   PASS
+```
+
+Decisions made during implementation (recorded here, no spec change needed):
+- FastAPI 0.142.2 runs a yield-dependency's exit code after the response is
+  sent unless declared with `scope="function"`. The commit must precede the
+  response, so `DbConnection = Annotated[AsyncConnection, Depends(get_connection,
+  scope="function")]` is the only way routes receive a connection (written once
+  in `src/db/engine.py`). All later modules must use `DbConnection`.
+- `get_current_user` and `require_admin` are plain coroutines (FastAPI raises
+  `DependencyScopeError` if a request-scoped generator depends on a
+  function-scoped one). One connection per request was verified for a route
+  using both.
+- `authentication_failed` log lines carry no user id (SPEC Section 7 says "when
+  known"): deliberately stricter, so logs do not reveal whether the email
+  existed.
+- Error-handler registration also covers unknown routes (404), wrong methods
+  (405) and unexpected exceptions (500) in the standard error shape.
+
+Known follow-ups (not blockers):
+- `get_session` in `src/db/engine.py` is unused; remove when convenient.
+- `engine.py` module docstring still mentions only `get_session`.
+- Test 18 commits one row and deletes it in `finally`; a hard kill mid-test can
+  leave `concurrent.signup@example.com` in the test database (the test deletes
+  by email first, so the next run is unaffected).
+- The dev database contains a smoke-test account (`smoke@example.com`, admin).
