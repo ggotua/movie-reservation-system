@@ -4,12 +4,19 @@ The engine is created once per process from ``Settings.database_url``.
 Business modules should receive sessions through :func:`get_session` (a
 FastAPI dependency) rather than importing the engine directly, so tests can
 substitute a different session source.
+
+The transaction boundary for the API is :func:`get_connection`; routes and
+dependencies take it through the :data:`DbConnection` alias, so the
+``scope="function"`` option is written in exactly one place (SPEC-2 Sections
+2.7 and 11.1).
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Annotated
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -85,10 +92,11 @@ async def get_connection() -> AsyncIterator[AsyncConnection]:
     *after* the response has been sent unless the dependency is declared with
     ``scope="function"``. The commit must be visible before the client receives
     the response, otherwise a follow-up request can miss the data this request
-    just wrote. Routes must therefore wire this dependency as
-    ``Depends(get_connection, scope="function")``. FastAPI 0.142.2 supports that
-    keyword; without it the default ``scope="request"`` applies and the commit
-    happens only after the response has gone out.
+    just wrote. Callers must therefore never depend on this function directly:
+    they annotate the parameter as :data:`DbConnection`, the one alias below
+    that supplies ``scope="function"``. FastAPI 0.142.2 supports that keyword;
+    without it the default ``scope="request"`` applies and the commit happens
+    only after the response has gone out.
 
     Yields:
         AsyncConnection: A connection bound to a transaction that is committed
@@ -100,3 +108,21 @@ async def get_connection() -> AsyncIterator[AsyncConnection]:
     """
     async with engine.begin() as connection:
         yield connection
+
+
+# The one way the application obtains a request-scoped database connection.
+#
+# ``scope="function"`` moves this generator's exit code -- the COMMIT -- into
+# the exit stack that FastAPI closes BEFORE it sends the response. With the
+# default ``scope="request"`` the commit would run only after the response had
+# gone out, so a client's follow-up request could miss the row this request just
+# wrote. Declaring it through one alias keeps that option written exactly once
+# (SPEC-2 Section 11.1): every route and dependency that annotates a parameter
+# as ``DbConnection`` resolves to the same callable, so FastAPI's dependency
+# cache hands the whole request ONE connection and ONE transaction.
+#
+# Only a coroutine, or another ``scope="function"`` dependency, may depend on
+# this alias: FastAPI raises ``DependencyScopeError`` when a generator that
+# resolves at ``scope="request"`` depends on a ``scope="function"`` one. That is
+# why ``get_current_user`` and ``require_admin`` are plain coroutines.
+DbConnection = Annotated[AsyncConnection, Depends(get_connection, scope="function")]
