@@ -15,6 +15,7 @@ A misconfigured deployment must not start silently.
 from __future__ import annotations
 
 from functools import lru_cache
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,6 +37,12 @@ class Settings(BaseSettings):
         jwt_expiry_minutes: JWT lifetime in minutes. Must be greater than 0.
         seat_hold_expiry_minutes: How long a seat hold stays active before
             it expires, in minutes. Must be greater than 0.
+        cinema_timezone: IANA timezone name that defines a "calendar day" for
+            browsing showtimes by date (SPEC-3 FR-13). Must be a known IANA
+            name; an unknown one fails loudly at startup.
+        showtime_slot_minutes: Minimum separation, in minutes, between two
+            showtimes on the same screen (SPEC-3 FR-11). Must be between 30 and
+            600 inclusive.
     """
 
     model_config = SettingsConfigDict(
@@ -49,6 +56,10 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(..., alias="JWT_SECRET", min_length=1)
     jwt_expiry_minutes: int = Field(60, alias="JWT_EXPIRY_MINUTES", gt=0)
     seat_hold_expiry_minutes: int = Field(15, alias="SEAT_HOLD_EXPIRY_MINUTES", gt=0)
+    cinema_timezone: str = Field("Asia/Tbilisi", alias="CINEMA_TIMEZONE")
+    showtime_slot_minutes: int = Field(
+        180, alias="SHOWTIME_SLOT_MINUTES", ge=30, le=600
+    )
 
     @field_validator("jwt_secret", "database_url")
     @classmethod
@@ -92,6 +103,34 @@ class Settings(BaseSettings):
         """
         if value.strip() and len(value) < 32:
             raise ValueError("JWT_SECRET must be at least 32 characters")
+        return value
+
+    @field_validator("cinema_timezone")
+    @classmethod
+    def _require_known_iana_timezone(cls, value: str) -> str:
+        """Reject a ``CINEMA_TIMEZONE`` that is not a known IANA name (FR-13).
+
+        The name selects the calendar day used to browse showtimes, so an
+        unknown name would make every date query wrong. Validating it here makes
+        a misconfigured deployment fail loudly at startup instead.
+
+        Args:
+            value: The raw ``CINEMA_TIMEZONE`` value supplied via the
+                environment.
+
+        Returns:
+            str: The unchanged value when ``zoneinfo`` can load it.
+
+        Raises:
+            ValueError: If the value is not a valid IANA timezone name.
+                ``zoneinfo`` raises ``ZoneInfoNotFoundError`` for an unknown
+                key and ``ValueError`` for a malformed one; both are translated
+                so the message names the offending setting.
+        """
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"{value!r} is not a valid IANA timezone name") from exc
         return value
 
 

@@ -20,6 +20,10 @@ dependencies = [
     # every async engine import (src/db/engine.py, the seed, tests) fails.
     "sqlalchemy[asyncio]>=2.0",
     "alembic",
+    # NOTE: tzdata supplies the IANA timezone database for `zoneinfo` on
+    # platforms that ship none (Windows). Required so the CINEMA_TIMEZONE
+    # setting can resolve names such as "Asia/Tbilisi" (SPEC-3 D2).
+    "tzdata",
     "psycopg[binary]",
     "pydantic[email]>=2",
     # NOTE: pydantic-settings is required to use Pydantic v2 BaseSettings

@@ -1,8 +1,8 @@
 """Application factory, global error handling and the server entry point.
 
 This module is the assembly point of the API skeleton (SPEC-2 Section 2.1): it
-builds the FastAPI application, mounts the auth and admin routers, and installs
-the exception handlers that give every failure the single shape fixed in
+builds the FastAPI application, mounts the auth, movie and showtime routers, and
+installs the exception handlers that give every failure the single shape fixed in
 ``docs/steering/conventions.md`` (SPEC-2 Sections 2.1, 2.9; FR-12).
 
 The database dependency is deliberately not wrapped or overridden here.
@@ -28,6 +28,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.auth.router import admin_router, auth_router
 from src.core.errors import ApiError, error_body
+from src.movies import router as movies_router
+from src.showtimes import router as showtimes_router
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +181,7 @@ def create_app() -> FastAPI:
     """Build the configured FastAPI application (SPEC-2 Section 2.1).
 
     Returns:
-        FastAPI: The application with both routers mounted and the four
+        FastAPI: The application with every router mounted and the four
         exception handlers installed. A fresh instance is built on every call,
         so a test can build its own instead of importing the module-level
         :data:`app`.
@@ -187,6 +189,10 @@ def create_app() -> FastAPI:
     app = FastAPI(title=_APP_TITLE)
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(movies_router.public_router)
+    app.include_router(movies_router.admin_router)
+    app.include_router(showtimes_router.public_router)
+    app.include_router(showtimes_router.admin_router)
 
     app.add_exception_handler(ApiError, _handle_api_error)
     app.add_exception_handler(RequestValidationError, _handle_validation_error)

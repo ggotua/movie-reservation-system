@@ -62,6 +62,18 @@ Every fixture here connects to ``TEST_DATABASE_URL`` only, never to
 that URL names a ``*_test`` database. The API fixtures give every request of one
 test ONE connection inside an outer transaction that is rolled back at teardown,
 so nothing a test writes is committed.
+
+SPEC-3 helpers
+--------------
+The bottom of this file adds the fixtures the SPEC-3 API tests share
+(``tests/integration/test_movies_api.py`` and ``test_showtimes_api.py``): an
+acting administrator (``admin_headers``), a ``now``-relative instant builder
+(``future_start``) and the three setup calls every write needs -- a genre-free
+movie, a screen with its generated seats and a showtime
+(``create_movie_via_api``, ``create_screen_via_api``, ``create_showtime_via_api``).
+They live here rather than in either module because both use them, and each one
+asserts the status it requires, so a test that only cares about its last request
+never has to re-check its setup.
 """
 
 from __future__ import annotations
@@ -70,7 +82,9 @@ import asyncio
 import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, Protocol
 
 import httpx
 import pytest
@@ -732,3 +746,259 @@ def auth_header() -> _AuthHeader:
         _AuthHeader: The header-builder helper.
     """
     return _auth_header
+
+
+# --- SPEC-3 setup helpers (movies, screens and showtimes) ------------------
+#
+# Every SPEC-3 write needs an acting administrator, and almost every showtime
+# test needs a movie and a screen to schedule on, so those four calls live here
+# instead of being repeated in both SPEC-3 test modules. Each helper asserts the
+# status it requires and returns the parsed body, so a test that only cares about
+# its final request never has to re-check its setup. The values they submit are
+# ordinary test data, never credentials: TEST_PASSWORD is a local literal
+# (IMPLEMENTER RULES, rule 6).
+
+# Satisfies SPEC-2's password policy and is long enough to be obviously a test
+# value. Tests that commit (SPEC-3 test 33) use their own e-mail addresses, so a
+# leftover row can never collide with a rolled-back one.
+TEST_PASSWORD = "spec-3 test password"
+
+
+def _future_start(offset: timedelta) -> datetime:
+    """Return the UTC instant ``offset`` after now (SPEC-3 Section 5).
+
+    Every SPEC-3 test builds its dates and instants this way rather than from a
+    hard-coded calendar date, so the suite keeps working on whatever day it is
+    run. A non-positive ``offset`` yields an instant that is not in the future,
+    which the API rejects with ``SHOWTIME_IN_PAST`` (FR-10).
+
+    Args:
+        offset: How far ahead of now the instant must be.
+
+    Returns:
+        datetime: ``datetime.now(UTC) + offset``, timezone-aware and in UTC.
+    """
+    return datetime.now(UTC) + offset
+
+
+async def _admin_headers(
+    client: httpx.AsyncClient,
+    conn: AsyncConnection,
+    email: str,
+) -> dict[str, str]:
+    """Sign an admin up, promote them in the database and return their header.
+
+    Promotion happens directly on the caller's connection
+    (:func:`_make_admin`) rather than through ``POST /admin/users/{id}/promote``,
+    which would need an already-seeded administrator to authorize it. With the
+    rolled-back connection the role change belongs to the test transaction, so it
+    leaves no trace behind.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        conn: The open connection the test shares with the application.
+        email: The administrator's address. Each test should use its own, so a
+            test that commits (SPEC-3 test 33) cannot collide with another.
+
+    Returns:
+        dict[str, str]: The ``Authorization`` header of the promoted admin.
+
+    Raises:
+        AssertionError: If the signup is not answered with 201 or the login is
+            not answered with 200, with the response body attached.
+    """
+    response = await _create_user(client, email, TEST_PASSWORD)
+    assert response.status_code == 201, response.text
+    await _make_admin(conn, int(response.json()["id"]))
+    return _auth_header(await _login(client, email, TEST_PASSWORD))
+
+
+async def _create_movie(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    title: str,
+    genre_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Create a movie through ``POST /admin/movies`` (SPEC-3 FR-3).
+
+    Only the two fields the SPEC-3 tests vary are exposed; a test that needs a
+    description or a poster URL posts directly, so its payload stays visible.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        headers: The acting administrator's ``Authorization`` header.
+        title: The movie title.
+        genre_ids: Genre ids to link, or ``None`` to omit the field entirely
+            (which the schema treats the same as an empty list, FR-3).
+
+    Returns:
+        dict[str, Any]: The 201 response body, i.e. a ``MovieOut``.
+
+    Raises:
+        AssertionError: If the movie is not created, with the body attached.
+    """
+    payload: dict[str, Any] = {"title": title}
+    if genre_ids is not None:
+        payload["genre_ids"] = genre_ids
+    response = await client.post("/admin/movies", json=payload, headers=headers)
+    assert response.status_code == 201, response.text
+    body: dict[str, Any] = response.json()
+    return body
+
+
+async def _create_screen(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    name: str,
+    rows: int,
+    seats_per_row: int,
+) -> dict[str, Any]:
+    """Create a screen through ``POST /admin/screens`` (SPEC-3 FR-9).
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        headers: The acting administrator's ``Authorization`` header.
+        name: The screen name, which must be unique.
+        rows: Number of seat rows; the API bounds it to 1..26.
+        seats_per_row: Seats in each row; the API bounds it to 1..40.
+
+    Returns:
+        dict[str, Any]: The 201 response body, i.e. a ``ScreenOut``.
+
+    Raises:
+        AssertionError: If the screen is not created, with the body attached.
+    """
+    response = await client.post(
+        "/admin/screens",
+        json={"name": name, "rows": rows, "seats_per_row": seats_per_row},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    body: dict[str, Any] = response.json()
+    return body
+
+
+async def _create_showtime(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    movie_id: int,
+    screen_id: int,
+    starts_at: datetime,
+    price_cents: int,
+) -> dict[str, Any]:
+    """Create a showtime through ``POST /admin/showtimes`` (SPEC-3 FR-10).
+
+    ``starts_at`` is sent with ``isoformat()``, so a UTC instant is submitted as
+    ``+00:00`` and a value built in another zone keeps its own offset -- the API
+    normalises both to the same instant (FR-15).
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        headers: The acting administrator's ``Authorization`` header.
+        movie_id: The id of an existing movie.
+        screen_id: The id of an existing screen.
+        starts_at: A timezone-aware start instant, strictly in the future.
+        price_cents: Ticket price in integer cents, 1..100 000 000.
+
+    Returns:
+        dict[str, Any]: The 201 response body, i.e. a ``ShowtimeOut``.
+
+    Raises:
+        AssertionError: If the showtime is not created, with the body attached.
+    """
+    response = await client.post(
+        "/admin/showtimes",
+        json={
+            "movie_id": movie_id,
+            "screen_id": screen_id,
+            "starts_at": starts_at.isoformat(),
+            "price_cents": price_cents,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    body: dict[str, Any] = response.json()
+    return body
+
+
+_FutureStart = Callable[[timedelta], datetime]
+_AdminHeaders = Callable[
+    [httpx.AsyncClient, AsyncConnection, str], Awaitable[dict[str, str]]
+]
+
+
+class _CreateMovie(Protocol):
+    """The :func:`_create_movie` signature, with ``genre_ids`` optional.
+
+    A protocol rather than a ``Callable`` alias because an alias cannot express
+    the defaulted fourth argument, and the tests call the helper both ways.
+    """
+
+    async def __call__(
+        self,
+        client: httpx.AsyncClient,
+        headers: dict[str, str],
+        title: str,
+        genre_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Create a movie through ``POST /admin/movies`` (SPEC-3 FR-3)."""
+        ...
+
+
+_CreateScreen = Callable[
+    [httpx.AsyncClient, dict[str, str], str, int, int], Awaitable[dict[str, Any]]
+]
+_CreateShowtime = Callable[
+    [httpx.AsyncClient, dict[str, str], int, int, datetime, int],
+    Awaitable[dict[str, Any]],
+]
+
+
+@pytest.fixture
+def future_start() -> _FutureStart:
+    """Expose :func:`_future_start` as ``future_start(offset) -> datetime``.
+
+    Returns:
+        _FutureStart: The instant builder.
+    """
+    return _future_start
+
+
+@pytest.fixture
+def admin_headers() -> _AdminHeaders:
+    """Expose :func:`_admin_headers` as ``admin_headers(client, conn, email)``.
+
+    Returns:
+        _AdminHeaders: The acting-administrator helper.
+    """
+    return _admin_headers
+
+
+@pytest.fixture
+def create_movie_via_api() -> _CreateMovie:
+    """Expose :func:`_create_movie` as ``create_movie_via_api(...)``.
+
+    Returns:
+        _CreateMovie: The movie helper.
+    """
+    return _create_movie
+
+
+@pytest.fixture
+def create_screen_via_api() -> _CreateScreen:
+    """Expose :func:`_create_screen` as ``create_screen_via_api(...)``.
+
+    Returns:
+        _CreateScreen: The screen helper.
+    """
+    return _create_screen
+
+
+@pytest.fixture
+def create_showtime_via_api() -> _CreateShowtime:
+    """Expose :func:`_create_showtime` as ``create_showtime_via_api(...)``.
+
+    Returns:
+        _CreateShowtime: The showtime helper.
+    """
+    return _create_showtime
