@@ -321,11 +321,24 @@ FRs for this prompt: FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-12.
    - `async def require_admin(user=Depends(get_current_user)) -> UserRecord`:
      role != admin -> ApiError("FORBIDDEN", ..., 403). It wraps
      get_current_user so an unauthenticated caller gets 401 first (FR-8).
-   If your previous report said the installed FastAPI supports the dependency
-   `scope` option for yield-dependencies, declare get_connection in these
-   dependencies with the option that makes the commit happen before the
-   response is sent (keep it in ONE place, e.g. a typed alias, so routes
-   don't each repeat it).
+   Finding from PROMPT 3 (verified with a probe on the installed FastAPI
+   0.142.2): a yield-dependency's exit code (our commit) runs AFTER the
+   response is sent unless it is declared `Depends(get_connection,
+   scope="function")`. Therefore:
+     * First add, at the end of backend/src/db/engine.py, ONE typed alias used
+       by every module from now on:
+       `DbConnection = Annotated[AsyncConnection, Depends(get_connection,
+       scope="function")]` (import Annotated and Depends as needed). This is
+       the only place the `scope="function"` option is written; every route
+       and dependency declares its connection parameter as `conn: DbConnection`.
+     * `get_current_user` and `require_admin` MUST stay plain coroutine
+       dependencies (not generators); FastAPI raises DependencyScopeError if a
+       request-scoped generator depends on a function-scoped one.
+     * A request that uses both `get_current_user` and a route handler must
+       share ONE connection and ONE transaction (dependency caching by the
+       same alias). Verify this in your report by showing how you confirmed it
+       (for example a throwaway probe counting `get_connection` invocations
+       for a request to `POST /admin/users/{id}/promote`; delete the probe).
 
 2) backend/src/auth/router.py — thin handlers only (parse -> service call ->
    shape response). Two routers:
@@ -393,9 +406,6 @@ IMPLEMENTER RULES — follow without exception:
    runs those. Unit tests with no database may be run.
 10. Report: files created/changed, commands run with results, anything you
     assumed or could not verify.
-```
-
----
 
 ## PROMPT 5: Tests
 
