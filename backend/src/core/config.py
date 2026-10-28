@@ -43,6 +43,11 @@ class Settings(BaseSettings):
         showtime_slot_minutes: Minimum separation, in minutes, between two
             showtimes on the same screen (SPEC-3 FR-11). Must be between 30 and
             600 inclusive.
+        hold_minutes: How long a reservation hold stays active before it
+            expires, in minutes (SPEC-4 D1, FR-5). Must be between 1 and 60
+            inclusive.
+        max_seats_per_hold: Maximum number of seats one hold may contain
+            (SPEC-4 D3). Must be between 1 and 20 inclusive.
     """
 
     model_config = SettingsConfigDict(
@@ -60,6 +65,10 @@ class Settings(BaseSettings):
     showtime_slot_minutes: int = Field(
         180, alias="SHOWTIME_SLOT_MINUTES", ge=30, le=600
     )
+    # SPEC-4 FR-13: a window or seat cap outside these bounds stops startup
+    # rather than silently changing the reservation rules.
+    hold_minutes: int = Field(10, alias="HOLD_MINUTES", ge=1, le=60)
+    max_seats_per_hold: int = Field(8, alias="MAX_SEATS_PER_HOLD", ge=1, le=20)
 
     @field_validator("jwt_secret", "database_url")
     @classmethod
