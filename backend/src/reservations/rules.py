@@ -1,9 +1,9 @@
-"""Pure hold-expiry and seat-state arithmetic for reservations (SPEC-4).
+"""Pure hold-expiry, effective-status and seat-state logic for reservations.
 
 No database and no HTTP: every function here takes plain values and returns a
-plain value, so the hold window and the seat-map derivation can be tested
-without a connection or a live request (SPEC-4 Sections 2.5 and 11, Single
-Responsibility Check).
+plain value, so the hold window, the status the API reports and the seat-map
+derivation can be tested without a connection or a live request (SPEC-4
+Sections 2.5 and 11, SPEC-5 Sections 2.5 and 11, Single Responsibility Check).
 
 All instants are timezone-aware UTC values (SPEC-4 FR-5). Every function that
 takes an instant rejects a naive ``datetime`` with :class:`ValueError`, because
@@ -15,6 +15,12 @@ A hold has no expiry column: its expiry is derived from ``created_at`` and
 are the two forms of that single calculation -- Python compares against the
 former, SQL selects on the latter -- and :func:`is_hold_expired` is the one
 boundary definition used by the service.
+
+:func:`effective_status` is the one definition of the status a stored
+reservation row is reported as (SPEC-5 FR-3): a ``held`` row past its expiry
+reads as ``expired`` while the stored row is left untouched ("reads never
+write", SPEC-4 Section 2.5). The reservation read-back in
+:mod:`src.reservations.service` calls it instead of repeating the condition.
 """
 
 from __future__ import annotations
@@ -22,10 +28,21 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal
 
-from src.core.enums import RESERVATION_STATUSES
+from src.core.enums import (
+    DEFAULT_RESERVATION_STATUS,
+    RESERVATION_STATUSES,
+    ReservationStatus,
+)
 
 # The three states the public seat map reports (SPEC-4 Section 2.3, FR-10).
 SeatState = Literal["available", "held", "taken"]
+
+# The statuses :func:`effective_status` compares, taken from the single
+# vocabulary in ``core/enums.py`` (SPEC-4 Section 10, DRY check): a new
+# reservation starts as ``held``, and ``RESERVATION_STATUSES`` declares the four
+# statuses in the order held, confirmed, cancelled, expired.
+_HELD_STATUS: ReservationStatus = DEFAULT_RESERVATION_STATUS
+_EXPIRED_STATUS: ReservationStatus = RESERVATION_STATUSES[-1]
 
 
 def _require_aware(value: datetime, name: str) -> None:
@@ -110,6 +127,49 @@ def hold_cutoff(now: datetime, hold_minutes: int) -> datetime:
     """
     _require_aware(now, "now")
     return now - timedelta(minutes=hold_minutes)
+
+
+def effective_status(
+    stored_status: ReservationStatus,
+    created_at: datetime,
+    now: datetime,
+    hold_minutes: int,
+) -> ReservationStatus:
+    """Derive the status a reservation is reported with (SPEC-5 FR-3).
+
+    This is the one definition of the lazy-expiry rule on reads: a stored
+    ``held`` row whose hold has expired (``is_hold_expired``, with the expiry
+    instant itself counting as expired) is reported as ``expired``. Every other
+    stored status -- ``confirmed``, ``cancelled`` and a stored ``expired`` -- is
+    returned unchanged, because only a hold can expire. Nothing is written:
+    reads compute the status instead of updating rows (SPEC-4 Section 2.5).
+
+    Args:
+        stored_status: The status stored on the reservation row.
+        created_at: ``created_at`` of the reservation, used as the start of the
+            hold window. Not used for statuses other than ``held``, but still
+            required because every row has one.
+        now: Timezone-aware instant representing the current time. The caller
+            passes one value per request so every check in that request agrees.
+        hold_minutes: The configured hold window (``HOLD_MINUTES``).
+
+    Returns:
+        ReservationStatus: ``expired`` when ``stored_status`` is ``held`` and
+        the hold has expired; otherwise ``stored_status`` unchanged.
+
+    Raises:
+        ValueError: If ``created_at`` or ``now`` is naive, or if
+            ``stored_status`` is not one of the shared reservation statuses --
+            an unknown value would otherwise be reported to a client as-is.
+    """
+    _require_aware(created_at, "created_at")
+    _require_aware(now, "now")
+    if stored_status not in RESERVATION_STATUSES:
+        raise ValueError(f"unknown reservation status: {stored_status!r}")
+
+    if stored_status == _HELD_STATUS and is_hold_expired(created_at, now, hold_minutes):
+        return _EXPIRED_STATUS
+    return stored_status
 
 
 def seat_state(

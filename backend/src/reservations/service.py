@@ -1,9 +1,11 @@
-"""Reservation business rules over an open database connection (SPEC-4).
+"""Reservation business rules over an open database connection (SPEC-4, SPEC-5).
 
 This module owns the seat map (FR-10), the hold algorithm (Section 2.5, FR-1
 through FR-6), and reservation read, confirm and release (Sections 2.6-2.8,
-FR-7 through FR-9), all with FR-11 and FR-12 applied. It is deliberately free of
-HTTP and FastAPI imports: every function takes an already-open
+FR-7 through FR-9), all with FR-11 and FR-12 applied. SPEC-5 adds the caller's
+reservation list (Section 2.5) and cancelling a confirmed reservation
+(Section 2.6). It is deliberately free of HTTP and FastAPI imports: every
+function takes an already-open
 :class:`~sqlalchemy.ext.asyncio.AsyncConnection`, never opens one itself and
 never commits, so the request-scoped transaction stays owned by
 :func:`src.db.engine.get_connection` and the same functions can be driven from
@@ -36,8 +38,19 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import and_, insert, select, text, update
+from sqlalchemy import (
+    ColumnElement,
+    Row,
+    and_,
+    func,
+    insert,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -51,6 +64,7 @@ from src.core.enums import (
 )
 from src.core.errors import ApiError
 from src.db.tables import (
+    movies,
     reservations,
     screens,
     seat_reservations,
@@ -60,11 +74,15 @@ from src.db.tables import (
 )
 from src.reservations import rules
 from src.reservations.schemas import (
+    MovieSummary,
+    ReservationListItem,
     ReservationOut,
     ScreenRef,
+    ScreenSummary,
     SeatMapOut,
     SeatOut,
     SeatRef,
+    ShowtimeSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,6 +99,7 @@ ACTIVE_HOLD_EXISTS = "ACTIVE_HOLD_EXISTS"
 RESERVATION_NOT_FOUND = "RESERVATION_NOT_FOUND"
 RESERVATION_EXPIRED = "RESERVATION_EXPIRED"
 RESERVATION_NOT_HELD = "RESERVATION_NOT_HELD"
+RESERVATION_NOT_CONFIRMED = "RESERVATION_NOT_CONFIRMED"
 TOO_MANY_SEATS = "TOO_MANY_SEATS"
 
 # The stored statuses this layer writes or compares. All are taken from the
@@ -237,6 +256,24 @@ def _reservation_not_held() -> ApiError:
     return ApiError(
         RESERVATION_NOT_HELD,
         "This reservation is not an active hold.",
+        409,
+    )
+
+
+def _reservation_not_confirmed() -> ApiError:
+    """Build the 409 returned when cancelling a non-confirmed reservation.
+
+    Only a confirmed reservation can be cancelled (SPEC-5 D1, FR-7). A held
+    reservation is given up with ``release`` (SPEC-4), and a stored
+    ``cancelled`` row may have been a released hold, so "already cancelled" is
+    deliberately not answered with 200 (SPEC-5 D2).
+
+    Returns:
+        ApiError: ``RESERVATION_NOT_CONFIRMED`` with status 409.
+    """
+    return ApiError(
+        RESERVATION_NOT_CONFIRMED,
+        "Only confirmed reservations can be cancelled.",
         409,
     )
 
@@ -686,6 +723,267 @@ async def get_reservation(
     return await _reservation_out(conn, reservation_id, now)
 
 
+async def list_reservations(
+    conn: AsyncConnection,
+    user_id: int,
+    status: ReservationStatus | None,
+    upcoming: bool | None,
+    limit: int,
+    offset: int,
+    now: datetime,
+) -> tuple[list[ReservationListItem], int]:
+    """Return one page of the caller's reservations, newest first (FR-1-FR-5).
+
+    One query reads the page (reservations joined to their showtime, movie and
+    screen) and one more reads the seats of exactly those reservations, so the
+    page costs two round trips regardless of how many rows it holds -- there is
+    no per-reservation seat query. A third query counts every reservation that
+    matches the same filters, ignoring ``limit`` / ``offset``, so the caller can
+    build the page envelope (SPEC-5 Section 2.5).
+
+    The ownership filter is part of every query: there is no parameter that
+    selects another user's rows (FR-1). Reads never write, so a stale ``held``
+    row is filtered and reported as ``expired`` through
+    :func:`src.reservations.rules.effective_status` and
+    :func:`src.reservations.rules.hold_cutoff`; it is left in storage for the
+    next hold's lazy expiry (SPEC-4 Section 2.5).
+
+    Args:
+        conn: An open connection. This function only reads and never commits.
+        user_id: The authenticated user; only rows they own are considered.
+        status: Optional filter on the *effective* status. ``held`` keeps
+            unexpired held rows, ``expired`` keeps stored-expired rows as well
+            as held rows at or past the cutoff, and ``confirmed`` /
+            ``cancelled`` compare the stored value. ``None`` applies no status
+            filter (D4).
+        upcoming: Optional filter on the showtime start (FR-4): ``True`` keeps
+            showtimes starting after ``now``, ``False`` keeps showtimes that
+            have started (``starts_at <= now``), ``None`` keeps both.
+        limit: Maximum number of rows to return; the caller's validated page
+            size (1-100).
+        offset: Number of rows to skip before the page starts (``>= 0``).
+        now: The current instant, timezone-aware. One value per request, so the
+            status filter, the effective status and ``expires_at`` agree.
+
+    Returns:
+        tuple[list[ReservationListItem], int]: The page's items in
+        ``created_at DESC, id DESC`` order with their seats ordered by row
+        label then seat number, and the total number of matching reservations
+        before pagination.
+
+    Raises:
+        ValueError: If ``now`` is naive; raised by
+            :func:`src.reservations.rules.hold_cutoff` as in SPEC-4. An empty
+            page is not an error: it is returned as an empty list and a
+            ``total`` of zero.
+    """
+    settings = get_settings()
+    hold_minutes = settings.hold_minutes
+    # One cutoff for both the filter and the count, so they cannot disagree
+    # about where a hold expires (SPEC-5 Section 2.5, DRY check).
+    cutoff = rules.hold_cutoff(now, hold_minutes)
+
+    filters: list[ColumnElement[bool]] = [reservations.c.user_id == user_id]
+    if status == _HELD_STATUS:
+        filters.append(
+            and_(
+                reservations.c.status == _HELD_STATUS,
+                reservations.c.created_at > cutoff,
+            )
+        )
+    elif status == _EXPIRED_STATUS:
+        filters.append(
+            or_(
+                reservations.c.status == _EXPIRED_STATUS,
+                and_(
+                    reservations.c.status == _HELD_STATUS,
+                    reservations.c.created_at <= cutoff,
+                ),
+            )
+        )
+    elif status is not None:
+        filters.append(reservations.c.status == status)
+    if upcoming is True:
+        filters.append(showtimes.c.starts_at > now)
+    elif upcoming is False:
+        filters.append(showtimes.c.starts_at <= now)
+
+    page_rows = (
+        await conn.execute(
+            select(
+                reservations.c.id,
+                reservations.c.showtime_id,
+                reservations.c.status,
+                reservations.c.created_at,
+                reservations.c.confirmed_at,
+                reservations.c.cancelled_at,
+                showtimes.c.starts_at,
+                showtimes.c.price_cents,
+                movies.c.id.label("movie_id"),
+                movies.c.title,
+                movies.c.poster_url,
+                screens.c.id.label("screen_id"),
+                screens.c.name.label("screen_name"),
+            )
+            .select_from(
+                reservations.join(
+                    showtimes, showtimes.c.id == reservations.c.showtime_id
+                )
+                .join(movies, movies.c.id == showtimes.c.movie_id)
+                .join(screens, screens.c.id == showtimes.c.screen_id)
+            )
+            .where(*filters)
+            .order_by(reservations.c.created_at.desc(), reservations.c.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+
+    # One extra query for the whole page's seats, grouped in Python. The ids
+    # come from the page itself, so a page with no rows skips the query
+    # entirely instead of asking for ``IN ()``.
+    reservation_ids = [row.id for row in page_rows]
+    seats_by_reservation: dict[int, list[SeatRef]] = {}
+    if reservation_ids:
+        seat_rows = (
+            await conn.execute(
+                select(
+                    seat_reservations.c.reservation_id,
+                    seats.c.id,
+                    seats.c.row_label,
+                    seats.c.seat_number,
+                )
+                .select_from(
+                    seat_reservations.join(
+                        seats, seats.c.id == seat_reservations.c.seat_id
+                    )
+                )
+                .where(seat_reservations.c.reservation_id.in_(reservation_ids))
+                .order_by(
+                    seat_reservations.c.reservation_id,
+                    seats.c.row_label,
+                    seats.c.seat_number,
+                )
+            )
+        ).all()
+        for seat_row in seat_rows:
+            seats_by_reservation.setdefault(seat_row.reservation_id, []).append(
+                SeatRef(
+                    seat_id=seat_row.id,
+                    row_label=seat_row.row_label,
+                    seat_number=seat_row.seat_number,
+                )
+            )
+
+    # The count joins the showtime too, because the ``upcoming`` filter reads
+    # ``showtimes.starts_at``; the inner joins on foreign keys never change the
+    # number of reservation rows.
+    total = (
+        await conn.execute(
+            select(func.count())
+            .select_from(
+                reservations.join(
+                    showtimes, showtimes.c.id == reservations.c.showtime_id
+                )
+            )
+            .where(*filters)
+        )
+    ).scalar_one()
+
+    items: list[ReservationListItem] = []
+    for row in page_rows:
+        # The single effective-status rule (SPEC-5 FR-3); nothing is written.
+        effective = rules.effective_status(
+            row.status,
+            row.created_at,
+            now,
+            hold_minutes,
+        )
+        reservation_seats = seats_by_reservation.get(row.id, [])
+        # ``expires_at`` is meaningful only while the reservation is still
+        # effectively held (SPEC-4 Section 2.3).
+        expires_at: datetime | None = (
+            rules.hold_expires_at(row.created_at, hold_minutes)
+            if effective == _HELD_STATUS
+            else None
+        )
+        items.append(
+            ReservationListItem(
+                id=row.id,
+                showtime_id=row.showtime_id,
+                status=effective,
+                seats=reservation_seats,
+                total_cents=row.price_cents * len(reservation_seats),
+                created_at=row.created_at,
+                expires_at=expires_at,
+                confirmed_at=row.confirmed_at,
+                cancelled_at=row.cancelled_at,
+                showtime=ShowtimeSummary(
+                    id=row.showtime_id,
+                    starts_at=row.starts_at,
+                    price_cents=row.price_cents,
+                    movie=MovieSummary(
+                        id=row.movie_id,
+                        title=row.title,
+                        poster_url=row.poster_url,
+                    ),
+                    screen=ScreenSummary(id=row.screen_id, name=row.screen_name),
+                ),
+            )
+        )
+    return items, total
+
+
+async def _lock_owned_reservation(
+    conn: AsyncConnection,
+    user_id: int,
+    reservation_id: int,
+) -> Row[*tuple[Any, ...]]:
+    """Lock one reservation row for update and enforce ownership (D4).
+
+    Every writer that mutates a reservation -- confirm, release and cancel --
+    starts here, so "missing" and "belongs to another user" are one 404
+    (SPEC-4 D4) and every writer takes the parent row lock before touching
+    seat rows, in the same order as lazy expiry. A second transaction on the
+    same reservation waits here and then sees the state the first committed,
+    which is what makes two simultaneous cancels resolve to one success
+    (SPEC-5 FR-9).
+
+    Args:
+        conn: An open connection. The caller owns the transaction; this helper
+            neither commits nor releases the lock.
+        user_id: The authenticated user; a row owned by someone else is
+            treated as missing.
+        reservation_id: The reservation's primary key.
+
+    Returns:
+        Row: The locked row with ``id``, ``showtime_id``, ``status`` and
+        ``created_at``, exactly the columns the callers decide on.
+
+    Raises:
+        ApiError: ``RESERVATION_NOT_FOUND`` with status 404 when the
+            reservation does not exist or belongs to another user.
+    """
+    reservation_row = (
+        await conn.execute(
+            select(
+                reservations.c.id,
+                reservations.c.showtime_id,
+                reservations.c.status,
+                reservations.c.created_at,
+            )
+            .where(
+                reservations.c.id == reservation_id,
+                reservations.c.user_id == user_id,
+            )
+            .with_for_update()
+        )
+    ).one_or_none()
+    if reservation_row is None:
+        raise _reservation_not_found()
+    return reservation_row
+
+
 async def confirm(
     conn: AsyncConnection,
     user_id: int,
@@ -721,23 +1019,7 @@ async def confirm(
             expiry; or ``SHOWTIME_STARTED`` (409) when the showtime has started.
     """
     settings = get_settings()
-    reservation_row = (
-        await conn.execute(
-            select(
-                reservations.c.id,
-                reservations.c.showtime_id,
-                reservations.c.status,
-                reservations.c.created_at,
-            )
-            .where(
-                reservations.c.id == reservation_id,
-                reservations.c.user_id == user_id,
-            )
-            .with_for_update()
-        )
-    ).one_or_none()
-    if reservation_row is None:
-        raise _reservation_not_found()
+    reservation_row = await _lock_owned_reservation(conn, user_id, reservation_id)
 
     if reservation_row.status == _CONFIRMED_STATUS:
         reservation = await _reservation_out(conn, reservation_id, now)
@@ -845,23 +1127,7 @@ async def release(
             unexpired reservation.
     """
     settings = get_settings()
-    reservation_row = (
-        await conn.execute(
-            select(
-                reservations.c.id,
-                reservations.c.showtime_id,
-                reservations.c.status,
-                reservations.c.created_at,
-            )
-            .where(
-                reservations.c.id == reservation_id,
-                reservations.c.user_id == user_id,
-            )
-            .with_for_update()
-        )
-    ).one_or_none()
-    if reservation_row is None:
-        raise _reservation_not_found()
+    reservation_row = await _lock_owned_reservation(conn, user_id, reservation_id)
 
     if reservation_row.status != _HELD_STATUS or rules.is_hold_expired(
         reservation_row.created_at,
@@ -891,6 +1157,98 @@ async def release(
     reservation = await _reservation_out(conn, reservation_id, now)
     logger.info(
         "reservation_released user_id=%s reservation_id=%s showtime_id=%s "
+        "seat_count=%s",
+        user_id,
+        reservation_id,
+        reservation_row.showtime_id,
+        len(reservation.seats),
+    )
+    return reservation
+
+
+async def cancel(
+    conn: AsyncConnection,
+    user_id: int,
+    reservation_id: int,
+    now: datetime,
+) -> ReservationOut:
+    """Cancel one confirmed reservation owned by the caller (SPEC-5 2.6).
+
+    Only a confirmed reservation of a showtime that has not started may be
+    cancelled (D1, D3). The reservation row is locked before any decision, so
+    two simultaneous cancels serialize and exactly one succeeds (FR-9); the
+    other sees ``cancelled`` and is refused with a 409 rather than answered
+    with 200, because cancel is deliberately not idempotent (D2).
+
+    The reservation row is written first and its seat rows second -- the same
+    lock order as confirm, release and lazy expiry -- so no state exists where
+    the reservation is cancelled while its seats are still blocked. Both
+    updates, and therefore the removal of the seat rows from the partial
+    unique index, commit together; cancelled rows are kept, never deleted
+    (D6, FR-11).
+
+    Args:
+        conn: An open connection. The caller owns the transaction and commit;
+            this function never commits.
+        user_id: The authenticated user; the reservation must belong to them.
+        reservation_id: The reservation's primary key.
+        now: The current instant, timezone-aware. Used as the start boundary
+            (``starts_at <= now`` is refused) and stored as ``cancelled_at``.
+
+    Returns:
+        ReservationOut: The reservation in its cancelled state, with its seats
+        ordered by row label then seat number and computed ``total_cents``.
+
+    Raises:
+        ApiError: ``RESERVATION_NOT_FOUND`` (404) when the reservation does not
+            exist or belongs to another user; ``RESERVATION_NOT_CONFIRMED``
+            (409) when its stored status is not ``confirmed``; or
+            ``SHOWTIME_STARTED`` (409) when the showtime has already started.
+    """
+    reservation_row = await _lock_owned_reservation(conn, user_id, reservation_id)
+
+    if reservation_row.status != _CONFIRMED_STATUS:
+        logger.info(
+            "reservation_cancel_rejected reason=not_confirmed user_id=%s "
+            "reservation_id=%s",
+            user_id,
+            reservation_id,
+        )
+        raise _reservation_not_confirmed()
+
+    starts_at = (
+        await conn.execute(
+            select(showtimes.c.starts_at).where(
+                showtimes.c.id == reservation_row.showtime_id
+            )
+        )
+    ).scalar_one()
+    if starts_at <= now:
+        logger.info(
+            "reservation_cancel_rejected reason=showtime_started user_id=%s "
+            "reservation_id=%s showtime_id=%s",
+            user_id,
+            reservation_id,
+            reservation_row.showtime_id,
+        )
+        raise _showtime_started()
+
+    # Reservation first, then its seat rows: the same lock order as confirm,
+    # release and lazy expiry, so writers cannot form a parent/child cycle.
+    await conn.execute(
+        update(reservations)
+        .where(reservations.c.id == reservation_id)
+        .values(status=_CANCELLED_STATUS, cancelled_at=now)
+    )
+    await conn.execute(
+        update(seat_reservations)
+        .where(seat_reservations.c.reservation_id == reservation_id)
+        .values(status=_CANCELLED_STATUS)
+    )
+
+    reservation = await _reservation_out(conn, reservation_id, now)
+    logger.info(
+        "reservation_cancelled user_id=%s reservation_id=%s showtime_id=%s "
         "seat_count=%s",
         user_id,
         reservation_id,
@@ -963,26 +1321,26 @@ async def _reservation_out(
     ).all()
 
     hold_minutes = get_settings().hold_minutes
-    expires_at: datetime | None = None
-    effective_status: ReservationStatus = reservation_row.status
-    if reservation_row.status == _HELD_STATUS:
-        if rules.is_hold_expired(
-            reservation_row.created_at,
-            now,
-            hold_minutes,
-        ):
-            effective_status = _EXPIRED_STATUS
-        else:
-            effective_status = _HELD_STATUS
-            expires_at = rules.hold_expires_at(
-                reservation_row.created_at,
-                hold_minutes,
-            )
+    # The effective-status rule is defined once, in ``rules.effective_status``
+    # (SPEC-5 FR-3); this read-back only applies it.
+    status = rules.effective_status(
+        reservation_row.status,
+        reservation_row.created_at,
+        now,
+        hold_minutes,
+    )
+    # ``expires_at`` is derived from the same window and is reported only while
+    # the reservation is still effectively held (SPEC-4 Section 2.3).
+    expires_at: datetime | None = (
+        rules.hold_expires_at(reservation_row.created_at, hold_minutes)
+        if status == _HELD_STATUS
+        else None
+    )
 
     return ReservationOut(
         id=reservation_row.id,
         showtime_id=reservation_row.showtime_id,
-        status=effective_status,
+        status=status,
         seats=[
             SeatRef(
                 seat_id=row.id,

@@ -93,13 +93,18 @@ from alembic.config import Config
 from fastapi import FastAPI
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import create_engine, update
+from sqlalchemy import Table, create_engine, func, insert, select, update
 from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from src.core.config import get_settings
-from src.core.enums import ADMIN_USER_ROLE
-from src.db.tables import users
+from src.core.enums import (
+    ACTIVE_RESERVATION_STATUSES,
+    ADMIN_USER_ROLE,
+    DEFAULT_RESERVATION_STATUS,
+    RESERVATION_STATUSES,
+)
+from src.db.tables import reservations, seat_reservations, seats, showtimes, users
 
 # backend/ — this file lives at backend/tests/conftest.py.
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -1002,3 +1007,657 @@ def create_showtime_via_api() -> _CreateShowtime:
         _CreateShowtime: The showtime helper.
     """
     return _create_showtime
+
+
+# --- SPEC-4 / SPEC-5 reservation helpers ----------------------------------
+#
+# These builders were local to tests/integration/test_reservations_api.py
+# until the SPEC-5 lifecycle tests needed the same setup, so they live in this
+# file once instead of in two test modules. Every helper asserts the status it
+# requires and returns parsed data, so a test that only cares about its final
+# request never re-checks its setup. The constants they share -- the two URL
+# templates, the unknown id and the SQL status literals -- are declared here
+# too, derived from the vocabulary in src/core/enums.py.
+
+_RESERVATIONS_URL = "/reservations"
+_SEAT_MAP_TEMPLATE = "/showtimes/{showtime_id}/seats"
+_UNKNOWN_ID = 999_999_999
+
+# Ordinary throwaway test data, never a credential (IMPLEMENTER RULES, rule 6).
+_USER_PASSWORD = "spec-4 test password"
+
+
+def _json_body(response: httpx.Response) -> dict[str, Any]:
+    """Return a response body as a JSON object.
+
+    Args:
+        response: The response to read.
+
+    Returns:
+        dict[str, Any]: The parsed body.
+
+    Raises:
+        AssertionError: If the body is not a JSON object, with it attached.
+    """
+    body: Any = response.json()
+    assert isinstance(body, dict), body
+    return body
+
+
+def _error_payload(response: httpx.Response) -> dict[str, str]:
+    """Return the standard ``error`` object of a failure response.
+
+    Args:
+        response: The failure response.
+
+    Returns:
+        dict[str, str]: The ``code`` and ``message`` of the failure.
+
+    Raises:
+        AssertionError: If the body does not have the standard shape or either
+            field is missing or empty.
+    """
+    body = _json_body(response)
+    assert set(body) == {"error"}, body
+    error = body["error"]
+    assert isinstance(error, dict), body
+    assert set(error) == {"code", "message"}, body
+    assert isinstance(error["code"], str) and error["code"], body
+    assert isinstance(error["message"], str) and error["message"], body
+    return error
+
+
+def _assert_error(response: httpx.Response, status: int, code: str) -> None:
+    """Assert a failure response has ``status``, the expected code and shape.
+
+    Args:
+        response: The failure response.
+        status: The expected HTTP status.
+        code: The expected machine-readable error code.
+    """
+    assert response.status_code == status, response.text
+    assert _error_payload(response)["code"] == code, response.text
+
+
+def _parse_optional_instant(value: str | None) -> datetime | None:
+    """Parse an optional ISO 8601 instant from a response body.
+
+    Args:
+        value: The serialised instant, or ``None``.
+
+    Returns:
+        datetime | None: The parsed timezone-aware instant, or ``None``.
+    """
+    return None if value is None else datetime.fromisoformat(value)
+
+
+async def _count_rows(conn: AsyncConnection, table: Table) -> int:
+    """Count every row of one table inside the test transaction.
+
+    Args:
+        conn: The test's connection, shared with the application's requests.
+        table: The table to count.
+
+    Returns:
+        int: The number of rows.
+    """
+    return int(
+        (await conn.execute(select(func.count()).select_from(table))).scalar_one()
+    )
+
+
+async def _reservation_row_counts(conn: AsyncConnection) -> tuple[int, int]:
+    """Return the reservation and seat-reservation row counts together.
+
+    Args:
+        conn: The test's connection.
+
+    Returns:
+        tuple[int, int]: ``(reservations, seat_reservations)`` row counts.
+    """
+    return (
+        await _count_rows(conn, reservations),
+        await _count_rows(conn, seat_reservations),
+    )
+
+
+async def _count_user_reservations(conn: AsyncConnection, user_id: int) -> int:
+    """Count the reservations belonging to one user.
+
+    Args:
+        conn: The test's connection.
+        user_id: The user whose rows to count.
+
+    Returns:
+        int: The number of reservation rows owned by ``user_id``.
+    """
+    return int(
+        (
+            await conn.execute(
+                select(func.count())
+                .select_from(reservations)
+                .where(reservations.c.user_id == user_id)
+            )
+        ).scalar_one()
+    )
+
+
+async def _create_account(
+    client: httpx.AsyncClient,
+    create_user: _CreateUser,
+    login: _Login,
+    auth_header: _AuthHeader,
+    email: str,
+) -> tuple[int, dict[str, str]]:
+    """Sign an ordinary user up, log them in and return their identity.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        create_user: The shared signup fixture.
+        login: The shared login fixture.
+        auth_header: The shared bearer-header fixture.
+        email: A unique address for this test.
+
+    Returns:
+        tuple[int, dict[str, str]]: The user's id and ``Authorization`` header.
+
+    Raises:
+        AssertionError: If signup is not answered with 201, with the body
+            attached.
+    """
+    response = await create_user(client, email, _USER_PASSWORD)
+    assert response.status_code == 201, response.text
+    user_id = int(_json_body(response)["id"])
+    token = await login(client, email, _USER_PASSWORD)
+    return user_id, auth_header(token)
+
+
+async def _create_screening(
+    client: httpx.AsyncClient,
+    conn: AsyncConnection,
+    admin_headers: _AdminHeaders,
+    future_start: _FutureStart,
+    create_movie: _CreateMovie,
+    create_screen: _CreateScreen,
+    create_showtime: _CreateShowtime,
+    *,
+    email: str,
+    title: str,
+    screen_name: str,
+    rows: int,
+    seats_per_row: int,
+    price_cents: int = 1_000,
+    start_offset: timedelta = timedelta(days=1),
+) -> tuple[dict[str, str], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Create an administrator, a movie, a screen with seats and a showtime.
+
+    Every test that needs a screening calls this once inside the test, so no
+    test depends on seeded data. The administrator is created and promoted by
+    the shared SPEC-3 helpers.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        conn: The rolled-back connection shared with the application.
+        admin_headers: The shared acting-administrator fixture.
+        future_start: The shared ``now``-relative instant builder.
+        create_movie: The shared movie fixture.
+        create_screen: The shared screen fixture.
+        create_showtime: The shared showtime fixture.
+        email: The administrator's unique address.
+        title: The movie title.
+        screen_name: The unique screen name.
+        rows: Number of seat rows.
+        seats_per_row: Seats in each row.
+        price_cents: Ticket price in integer cents.
+        start_offset: How far ahead of now the showtime starts.
+
+    Returns:
+        tuple: The administrator's header, the movie, the screen and the
+        showtime response bodies, in that order.
+    """
+    headers = await admin_headers(client, conn, email)
+    movie = await create_movie(client, headers, title)
+    screen = await create_screen(client, headers, screen_name, rows, seats_per_row)
+    showtime = await create_showtime(
+        client,
+        headers,
+        int(movie["id"]),
+        int(screen["id"]),
+        future_start(start_offset),
+        price_cents,
+    )
+    return headers, movie, screen, showtime
+
+
+async def _seat_map(client: httpx.AsyncClient, showtime_id: int) -> dict[str, Any]:
+    """Fetch and assert the public seat map of a showtime.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        showtime_id: The showtime whose map to read.
+
+    Returns:
+        dict[str, Any]: The 200 response body.
+
+    Raises:
+        AssertionError: If the request is not answered with 200, with the body
+            attached.
+    """
+    response = await client.get(_SEAT_MAP_TEMPLATE.format(showtime_id=showtime_id))
+    assert response.status_code == 200, response.text
+    return _json_body(response)
+
+
+async def _seat_ids(client: httpx.AsyncClient, showtime_id: int) -> list[int]:
+    """Return the seat ids of a showtime's screen in map order.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        showtime_id: The showtime whose seats to read.
+
+    Returns:
+        list[int]: Seat ids ordered by row label then seat number.
+    """
+    body = await _seat_map(client, showtime_id)
+    return [int(seat["seat_id"]) for seat in body["seats"]]
+
+
+def _states_by_seat(body: dict[str, Any]) -> dict[int, str]:
+    """Map each seat id of a seat-map body to its derived state.
+
+    Args:
+        body: A ``SeatMapOut`` response body.
+
+    Returns:
+        dict[int, str]: ``seat_id -> available | held | taken``.
+    """
+    return {int(seat["seat_id"]): str(seat["state"]) for seat in body["seats"]}
+
+
+async def _screen_seat_ids(conn: AsyncConnection, screen_id: int) -> list[int]:
+    """Load a screen's seat ids directly, ordered by row and number.
+
+    Used where no showtime exists for the screen (the other-screen seat test)
+    or where the showtime cannot be created through the API (the started test).
+
+    Args:
+        conn: The test's connection.
+        screen_id: The screen whose seats to load.
+
+    Returns:
+        list[int]: Seat ids ordered by row label then seat number.
+    """
+    rows = (
+        await conn.execute(
+            select(seats.c.id)
+            .where(seats.c.screen_id == screen_id)
+            .order_by(seats.c.row_label, seats.c.seat_number)
+        )
+    ).all()
+    return [int(row.id) for row in rows]
+
+
+async def _hold(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    showtime_id: int,
+    seat_ids: list[int],
+) -> httpx.Response:
+    """Post a hold request and return its raw response.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        headers: The acting user's ``Authorization`` header.
+        showtime_id: The showtime to hold seats on.
+        seat_ids: The requested seat ids.
+
+    Returns:
+        httpx.Response: The unasserted response, so a failure test can inspect
+        it.
+    """
+    return await client.post(
+        _RESERVATIONS_URL,
+        json={"showtime_id": showtime_id, "seat_ids": seat_ids},
+        headers=headers,
+    )
+
+
+async def _confirm(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    reservation_id: int,
+) -> httpx.Response:
+    """Post a confirmation request and return its raw response.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        headers: The acting user's ``Authorization`` header.
+        reservation_id: The reservation to confirm.
+
+    Returns:
+        httpx.Response: The unasserted response.
+    """
+    return await client.post(
+        f"{_RESERVATIONS_URL}/{reservation_id}/confirm",
+        headers=headers,
+    )
+
+
+async def _release(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    reservation_id: int,
+) -> httpx.Response:
+    """Post a release request and return its raw response.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        headers: The acting user's ``Authorization`` header.
+        reservation_id: The reservation to release.
+
+    Returns:
+        httpx.Response: The unasserted response.
+    """
+    return await client.post(
+        f"{_RESERVATIONS_URL}/{reservation_id}/release",
+        headers=headers,
+    )
+
+
+async def _get_reservation(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    reservation_id: int,
+) -> httpx.Response:
+    """Get one reservation and return its raw response.
+
+    Args:
+        client: The ASGI client bound to the application under test.
+        headers: The acting user's ``Authorization`` header.
+        reservation_id: The reservation to read.
+
+    Returns:
+        httpx.Response: The unasserted response.
+    """
+    return await client.get(
+        f"{_RESERVATIONS_URL}/{reservation_id}",
+        headers=headers,
+    )
+
+
+async def _stored_reservation_status(conn: AsyncConnection, reservation_id: int) -> str:
+    """Return the stored status of one reservation row.
+
+    Args:
+        conn: The test's connection.
+        reservation_id: The reservation primary key.
+
+    Returns:
+        str: The stored status (not the derived effective status).
+    """
+    return str(
+        (
+            await conn.execute(
+                select(reservations.c.status).where(reservations.c.id == reservation_id)
+            )
+        ).scalar_one()
+    )
+
+
+async def _stored_seat_statuses(
+    conn: AsyncConnection,
+    reservation_id: int,
+) -> list[str]:
+    """Return the stored statuses of a reservation's seat rows.
+
+    Args:
+        conn: The test's connection.
+        reservation_id: The reservation primary key.
+
+    Returns:
+        list[str]: One stored status per seat row, ordered by seat id.
+    """
+    rows = (
+        await conn.execute(
+            select(seat_reservations.c.status)
+            .where(seat_reservations.c.reservation_id == reservation_id)
+            .order_by(seat_reservations.c.seat_id)
+        )
+    ).all()
+    return [str(row.status) for row in rows]
+
+
+async def _assert_stored_status(
+    conn: AsyncConnection,
+    reservation_id: int,
+    status: str,
+) -> None:
+    """Assert a reservation and every one of its seat rows store ``status``.
+
+    Args:
+        conn: The test's connection.
+        reservation_id: The reservation primary key.
+        status: The expected stored status.
+    """
+    assert await _stored_reservation_status(conn, reservation_id) == status
+    seat_statuses = await _stored_seat_statuses(conn, reservation_id)
+    assert seat_statuses, reservation_id
+    assert set(seat_statuses) == {status}, seat_statuses
+
+
+async def _insert_reservation(
+    conn: AsyncConnection,
+    *,
+    user_id: int,
+    showtime_id: int,
+    seat_ids: list[int],
+    status: str,
+    created_at: datetime,
+    confirmed_at: datetime | None = None,
+    cancelled_at: datetime | None = None,
+) -> int:
+    """Insert a reservation and its seat rows directly, bypassing the service.
+
+    Used for states the API cannot create: a confirmed seat that predates the
+    hold under test and a reservation on a started showtime (SPEC-4 Section 5,
+    tests 16 and 26).
+
+    Args:
+        conn: The test's connection.
+        user_id: The owner's primary key.
+        showtime_id: The showtime the reservation belongs to.
+        seat_ids: The seats to attach to the reservation.
+        status: The status stored on both the reservation and every seat row.
+        created_at: The stored creation instant.
+        confirmed_at: The stored confirmation instant, or ``None``.
+        cancelled_at: The stored cancellation instant, or ``None``.
+
+    Returns:
+        int: The inserted reservation's primary key.
+    """
+    reservation_id = int(
+        (
+            await conn.execute(
+                insert(reservations)
+                .values(
+                    user_id=user_id,
+                    showtime_id=showtime_id,
+                    status=status,
+                    created_at=created_at,
+                    confirmed_at=confirmed_at,
+                    cancelled_at=cancelled_at,
+                )
+                .returning(reservations.c.id)
+            )
+        ).scalar_one()
+    )
+    await conn.execute(
+        insert(seat_reservations).values(
+            [
+                {
+                    "reservation_id": reservation_id,
+                    "showtime_id": showtime_id,
+                    "seat_id": seat_id,
+                    "status": status,
+                }
+                for seat_id in seat_ids
+            ]
+        )
+    )
+    return reservation_id
+
+
+async def _insert_showtime(
+    conn: AsyncConnection,
+    *,
+    movie_id: int,
+    screen_id: int,
+    starts_at: datetime,
+    price_cents: int,
+) -> int:
+    """Insert a showtime directly, bypassing the future-only API rule.
+
+    Args:
+        conn: The test's connection.
+        movie_id: An existing movie.
+        screen_id: An existing screen.
+        starts_at: The start instant, past or future.
+        price_cents: Ticket price in integer cents.
+
+    Returns:
+        int: The inserted showtime's primary key.
+    """
+    return int(
+        (
+            await conn.execute(
+                insert(showtimes)
+                .values(
+                    movie_id=movie_id,
+                    screen_id=screen_id,
+                    starts_at=starts_at,
+                    price_cents=price_cents,
+                )
+                .returning(showtimes.c.id)
+            )
+        ).scalar_one()
+    )
+
+
+async def _set_reservation_status(
+    conn: AsyncConnection,
+    reservation_id: int,
+    status: str,
+) -> None:
+    """Rewrite a reservation and all of its seat rows to a stored status.
+
+    Args:
+        conn: The test's connection.
+        reservation_id: The reservation primary key.
+        status: The status to store on the parent and every child row.
+    """
+    await conn.execute(
+        update(reservations)
+        .where(reservations.c.id == reservation_id)
+        .values(status=status)
+    )
+    await conn.execute(
+        update(seat_reservations)
+        .where(seat_reservations.c.reservation_id == reservation_id)
+        .values(status=status)
+    )
+
+
+async def _set_reservation_created_at(
+    conn: AsyncConnection,
+    reservation_id: int,
+    created_at: datetime,
+) -> None:
+    """Rewrite only a reservation's ``created_at`` to age a hold.
+
+    Args:
+        conn: The test's connection.
+        reservation_id: The reservation primary key.
+        created_at: The creation instant to store.
+    """
+    await conn.execute(
+        update(reservations)
+        .where(reservations.c.id == reservation_id)
+        .values(created_at=created_at)
+    )
+
+
+async def _stored_reservation_fields(
+    conn: AsyncConnection,
+    reservation_id: int,
+) -> tuple[str, datetime, datetime | None, datetime | None]:
+    """Return the stored status and lifecycle instants of one reservation.
+
+    Args:
+        conn: The test's connection.
+        reservation_id: The reservation primary key.
+
+    Returns:
+        tuple: ``(status, created_at, confirmed_at, cancelled_at)``.
+    """
+    row = (
+        await conn.execute(
+            select(
+                reservations.c.status,
+                reservations.c.created_at,
+                reservations.c.confirmed_at,
+                reservations.c.cancelled_at,
+            ).where(reservations.c.id == reservation_id)
+        )
+    ).one()
+    return (
+        str(row.status),
+        row.created_at,
+        row.confirmed_at,
+        row.cancelled_at,
+    )
+
+
+async def _assert_rows_unchanged(
+    conn: AsyncConnection,
+    before: tuple[int, int],
+) -> None:
+    """Assert no reservation or seat-reservation row was added or removed.
+
+    Args:
+        conn: The test's connection.
+        before: The pair returned by :func:`_reservation_row_counts` before the
+            failing request.
+    """
+    assert await _reservation_row_counts(conn) == before
+
+
+async def _assert_status_consistent(conn: AsyncConnection) -> None:
+    """Assert every reservation has the same status as all of its seat rows.
+
+    Args:
+        conn: The test's connection.
+    """
+    mismatches = (
+        await conn.execute(
+            select(reservations.c.id, seat_reservations.c.id)
+            .select_from(
+                reservations.join(
+                    seat_reservations,
+                    seat_reservations.c.reservation_id == reservations.c.id,
+                )
+            )
+            .where(reservations.c.status != seat_reservations.c.status)
+        )
+    ).all()
+    assert mismatches == [], mismatches
+
+
+# The SQL status literals used by tests are taken from the shared vocabulary.
+_HELD = DEFAULT_RESERVATION_STATUS
+_CONFIRMED = RESERVATION_STATUSES[1]
+_CANCELLED = RESERVATION_STATUSES[2]
+_EXPIRED = RESERVATION_STATUSES[3]
+
+assert _HELD == DEFAULT_RESERVATION_STATUS
+assert set(ACTIVE_RESERVATION_STATUSES) == {_HELD, _CONFIRMED}
+assert set(RESERVATION_STATUSES) == {_HELD, _CONFIRMED, _CANCELLED, _EXPIRED}

@@ -8,10 +8,13 @@ results never depend on the machine clock.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 
+from src.core.enums import ReservationStatus
 from src.reservations.rules import (
+    effective_status,
     hold_cutoff,
     hold_expires_at,
     is_hold_expired,
@@ -140,3 +143,54 @@ def test_seat_state_derivation() -> None:
         seat_state(None, None, naive, _HOLD_MINUTES)
     with pytest.raises(ValueError):
         seat_state("held", naive, five_minutes_later, _HOLD_MINUTES)
+
+
+def test_effective_status_derivation() -> None:
+    """Test 1: a held row expires at the boundary; other statuses never change."""
+    window = timedelta(minutes=_HOLD_MINUTES)
+    inside_window = _BASE + timedelta(minutes=5)
+
+    # A hold inside its window is still held.
+    assert effective_status("held", _BASE, inside_window, _HOLD_MINUTES) == "held"
+
+    # One second before the expiry instant is still a hold.
+    assert (
+        effective_status(
+            "held", _BASE, _BASE + window - timedelta(seconds=1), _HOLD_MINUTES
+        )
+        == "held"
+    )
+
+    # Exactly created_at + HOLD is expired (the boundary belongs to expired),
+    # and so is one second later.
+    assert effective_status("held", _BASE, _BASE + window, _HOLD_MINUTES) == "expired"
+    assert (
+        effective_status(
+            "held", _BASE, _BASE + window + timedelta(seconds=1), _HOLD_MINUTES
+        )
+        == "expired"
+    )
+
+    # Only a held row can expire: confirmed, cancelled and stored expired keep
+    # their status however old the row is.
+    terminal_statuses: tuple[ReservationStatus, ...] = (
+        "confirmed",
+        "cancelled",
+        "expired",
+    )
+    a_day_later = _BASE + timedelta(days=1)
+    for status in terminal_statuses:
+        assert effective_status(status, _BASE, a_day_later, _HOLD_MINUTES) == status
+
+    # Naive instants are rejected rather than compared in local time.
+    naive = datetime(2026, 10, 18, 12, 0)  # noqa: DTZ001 - naive on purpose
+    with pytest.raises(ValueError):
+        effective_status("held", naive, inside_window, _HOLD_MINUTES)
+    with pytest.raises(ValueError):
+        effective_status("confirmed", _BASE, naive, _HOLD_MINUTES)
+
+    # An unknown stored status is rejected instead of being echoed to a client.
+    with pytest.raises(ValueError):
+        effective_status(
+            cast(ReservationStatus, "pending"), _BASE, inside_window, _HOLD_MINUTES
+        )

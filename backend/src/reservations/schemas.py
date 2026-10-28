@@ -1,10 +1,12 @@
-"""Pydantic request and response models for the reservation endpoints (SPEC-4 2.3).
+"""Pydantic request and response models for the reservation endpoints.
 
-These are the wire formats fixed by SPEC-4 Section 2.3. They only shape and
-validate: the seat cap, showtime/seat existence, ownership, expiry and the
-``total_cents`` calculation all live in :mod:`src.reservations.service`, so this
-module imports nothing from it and no response model carries a field the SPEC
-does not list.
+The SPEC-4 models are the wire formats fixed by SPEC-4 Section 2.3. SPEC-5 adds
+:class:`ShowtimeSummary`, :class:`ReservationListItem` and :class:`ListParams`
+for the reservation list without changing ``ReservationOut`` or any other
+SPEC-4 schema (SPEC-5 D5). They only shape and validate: the seat cap,
+showtime/seat existence, ownership, expiry, filtering and the ``total_cents``
+calculation all live in :mod:`src.reservations.service`, so this module imports
+nothing from it and no response model carries a field the SPEC does not list.
 
 Input rules implemented here, all from SPEC-4 Section 2.3 and FR-3:
 
@@ -35,6 +37,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.core.enums import ReservationStatus, SeatType
+from src.core.pagination import PageParams
 from src.reservations.rules import SeatState
 
 
@@ -145,6 +148,103 @@ class ReservationOut(BaseModel):
     expires_at: datetime | None
     confirmed_at: datetime | None
     cancelled_at: datetime | None
+
+
+class MovieSummary(BaseModel):
+    """The movie embedded in a reservation list item (SPEC-5 Section 2.3).
+
+    Declared here rather than imported from :mod:`src.movies`: the
+    ``reservations`` module must not import the ``movies`` module (SPEC-4
+    Section 11.1).
+
+    Attributes:
+        id: The movie's primary key.
+        title: The stored movie title.
+        poster_url: The poster image URL, or ``None`` when no poster is stored
+            (the column is nullable in SPEC-1 Section 2.3).
+    """
+
+    id: int
+    title: str
+    poster_url: str | None
+
+
+class ScreenSummary(BaseModel):
+    """The screen embedded in a reservation list item (SPEC-5 Section 2.3).
+
+    Only the identity is needed by the list, unlike :class:`ScreenRef` which
+    also carries the seat-map dimensions.
+
+    Attributes:
+        id: The screen's primary key.
+        name: The stored screen name.
+    """
+
+    id: int
+    name: str
+
+
+class ShowtimeSummary(BaseModel):
+    """The showtime embedded in a reservation list item (SPEC-5 D5).
+
+    Attributes:
+        id: The showtime's primary key.
+        starts_at: When the showtime starts, in UTC.
+        price_cents: The showtime's ticket price in integer cents
+            (``principles.md``: money is never a float).
+        movie: The movie being shown.
+        screen: The screen the showtime runs on.
+    """
+
+    id: int
+    starts_at: datetime
+    price_cents: int
+    movie: MovieSummary
+    screen: ScreenSummary
+
+
+class ReservationListItem(ReservationOut):
+    """One reservation in the caller's list, with its showtime embedded.
+
+    It has every field of :class:`ReservationOut` -- unchanged, so the SPEC-4
+    response shape stays fixed (SPEC-5 D5) -- plus the nested ``showtime``. As
+    in :class:`ReservationOut`, ``status`` is the effective status: a ``held``
+    row past its expiry is reported as ``expired`` without a write.
+
+    Attributes:
+        showtime: The showtime, movie and screen the reservation belongs to.
+    """
+
+    showtime: ShowtimeSummary
+
+
+class ListParams(BaseModel):
+    """The validated query of ``GET /reservations`` (SPEC-5 Section 2.3, D4).
+
+    ``page`` reuses the shared :class:`~src.core.pagination.PageParams` (and
+    therefore :func:`~src.core.pagination.get_page_params`), so the
+    ``limit``/``offset`` bounds are defined in exactly one place instead of a
+    second pagination implementation.
+
+    Attributes:
+        status: Optional filter on the *effective* status, one of ``held``,
+            ``confirmed``, ``cancelled`` or ``expired``. Omitted means no
+            status filter. A ``held`` row past its expiry matches ``expired``
+            (SPEC-5 FR-3); the filter itself is applied by the service.
+        upcoming: Optional filter on the showtime start (SPEC-5 FR-4):
+            ``True`` keeps showtimes that start after ``now``, ``False`` keeps
+            showtimes that have started (``starts_at <= now``), and omitted
+            keeps both. Query strings such as ``"true"``/``"false"`` are parsed
+            into booleans; anything else is a validation error.
+        page: The validated pagination window: ``limit`` 1-100 (default 20)
+            and ``offset`` 0 or greater.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: ReservationStatus | None = None
+    upcoming: bool | None = None
+    page: PageParams
 
 
 class ScreenRef(BaseModel):
