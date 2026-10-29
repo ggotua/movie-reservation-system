@@ -82,9 +82,10 @@ import asyncio
 import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -784,6 +785,55 @@ def _future_start(offset: timedelta) -> datetime:
         datetime: ``datetime.now(UTC) + offset``, timezone-aware and in UTC.
     """
     return datetime.now(UTC) + offset
+
+
+def _cinema_zone() -> ZoneInfo:
+    """Return the configured calendar-day timezone (SPEC-3 FR-13).
+
+    Returns:
+        ZoneInfo: The zone named by ``CINEMA_TIMEZONE``.
+    """
+    return ZoneInfo(get_settings().cinema_timezone)
+
+
+def _local_day(zone: ZoneInfo, offset_days: int) -> date:
+    """Return the local calendar day ``offset_days`` from today.
+
+    Args:
+        zone: The cinema's timezone.
+        offset_days: How many days ahead of the local today to look.
+
+    Returns:
+        date: The local calendar date.
+    """
+    return (datetime.now(UTC).astimezone(zone) + timedelta(days=offset_days)).date()
+
+
+def _local_instant(
+    zone: ZoneInfo,
+    day: date,
+    hour: int,
+    minute: int,
+    second: int = 0,
+) -> datetime:
+    """Build the UTC instant of a local wall-clock time on a local day.
+
+    The seconds default to zero, so the common "on the hour" call keeps its
+    three-argument form while a boundary test can ask for ``23:59:59``.
+
+    Args:
+        zone: The cinema's timezone.
+        day: The local calendar day.
+        hour: Local hour, 0..23.
+        minute: Local minute, 0..59.
+        second: Local second, 0..59; defaults to 0.
+
+    Returns:
+        datetime: The same moment expressed in UTC, timezone-aware.
+    """
+    return datetime.combine(day, time(hour, minute, second), tzinfo=zone).astimezone(
+        UTC
+    )
 
 
 async def _admin_headers(

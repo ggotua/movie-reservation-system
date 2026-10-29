@@ -29,6 +29,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from src.auth.router import admin_router, auth_router
 from src.core.errors import ApiError, error_body
 from src.movies import router as movies_router
+from src.reporting import router as reporting_router
 from src.reservations import router as reservations_router
 from src.showtimes import router as showtimes_router
 
@@ -195,6 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(showtimes_router.public_router)
     app.include_router(showtimes_router.admin_router)
     app.include_router(reservations_router.router)
+    app.include_router(reporting_router.router)
 
     app.add_exception_handler(ApiError, _handle_api_error)
     app.add_exception_handler(RequestValidationError, _handle_validation_error)

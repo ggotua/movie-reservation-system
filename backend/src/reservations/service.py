@@ -46,7 +46,6 @@ from sqlalchemy import (
     and_,
     func,
     insert,
-    or_,
     select,
     text,
     update,
@@ -63,6 +62,7 @@ from src.core.enums import (
     ReservationStatus,
 )
 from src.core.errors import ApiError
+from src.db.reservation_filters import effective_status_condition
 from src.db.tables import (
     movies,
     reservations,
@@ -784,25 +784,10 @@ async def list_reservations(
     cutoff = rules.hold_cutoff(now, hold_minutes)
 
     filters: list[ColumnElement[bool]] = [reservations.c.user_id == user_id]
-    if status == _HELD_STATUS:
-        filters.append(
-            and_(
-                reservations.c.status == _HELD_STATUS,
-                reservations.c.created_at > cutoff,
-            )
-        )
-    elif status == _EXPIRED_STATUS:
-        filters.append(
-            or_(
-                reservations.c.status == _EXPIRED_STATUS,
-                and_(
-                    reservations.c.status == _HELD_STATUS,
-                    reservations.c.created_at <= cutoff,
-                ),
-            )
-        )
-    elif status is not None:
-        filters.append(reservations.c.status == status)
+    # The effective status is filtered through the one shared SQL definition
+    # (SPEC-6 D7), the same condition the admin list of SPEC-6 uses.
+    if status is not None:
+        filters.append(effective_status_condition(status, cutoff))
     if upcoming is True:
         filters.append(showtimes.c.starts_at > now)
     elif upcoming is False:
