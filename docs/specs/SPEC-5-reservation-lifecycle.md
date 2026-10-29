@@ -386,4 +386,34 @@ it reads `src.db.tables` directly and does not import `movies` or `showtimes`.
 
 ## Implementation Status
 
-NOT STARTED
+STATUS: IMPLEMENTED AND VERIFIED BY TESTS (2026-10-29); CI result and manual smoke
+test to be recorded (see below)
+
+Delivered (under `backend/`): `effective_status` in `src/reservations/rules.py`;
+`ReservationListItem`, `ShowtimeSummary`, `ListParams` in
+`src/reservations/schemas.py`; `list_reservations` and `cancel` in
+`src/reservations/service.py`; `GET /reservations` and
+`POST /reservations/{id}/cancel` in `src/reservations/router.py`. Tests: unit
+tests 1-2 in `tests/unit/`, integration tests 3-19 in
+`tests/integration/test_reservation_lifecycle_api.py`, concurrency tests 20-21
+in `tests/integration/test_reservation_lifecycle_concurrency.py`. Prompts:
+`docs/prompts/PROMPT-5-lifecycle.md`. No schema change, no new dependency, no
+new setting; no SPEC-4 endpoint or response shape changed.
+
+Verification evidence (hosted Neon, database `movie_reservation_test`):
+- ruff check clean; `mypy --strict src tests` clean (44 files).
+- Concurrency gate (Section 5.1): `test_reservation_lifecycle_concurrency.py` =
+  2 passed, in 5 consecutive runs (42.7-43.8 s each). No failure, no flaky run.
+- Full suite (SPEC-1 to SPEC-5): 144 passed in 544 s (123 before SPEC-5 + 21 new).
+
+Known follow-ups (accepted, no code change now):
+- The helper functions in `test_reservation_lifecycle_concurrency.py` duplicate
+  those in `test_reservations_concurrency.py` (SPEC-4). Move them to one shared
+  test module in a later cleanup, then re-run both concurrency gates.
+- Test users in the concurrency tests use fixed email addresses; a killed
+  process could leave one behind and fail the next run (cleanup in `finally`
+  covers normal failures).
+
+Still open:
+- CI run for the SPEC-5 commit: to be recorded after push.
+- Manual smoke test with the real server: not performed.
