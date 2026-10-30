@@ -10,8 +10,12 @@ The database dependency is deliberately not wrapped or overridden here.
 response is sent, and it rolls back when the handler raises (SPEC-2 Section
 2.7), so a failure handled below has already been rolled back.
 
-Nothing else is added: no CORS (it arrives with the frontend, Section 9), no
-extra routes and no middleware.
+One middleware is installed: Starlette's ``CORSMiddleware``, configured from
+``CORS_ORIGINS`` (SPEC-7 D2, FR-9). It wraps the exception-handling middleware,
+so the error responses built below keep the CORS headers as well as the standard
+error body. Starlette keeps its own ``ServerErrorMiddleware`` outermost, so only
+the unhandled-failure path -- which the handler below already logs -- stays
+outside that wrapper. Nothing else is added: no extra routes.
 """
 
 from __future__ import annotations
@@ -23,10 +27,12 @@ import sys
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.auth.router import admin_router, auth_router
+from src.core.config import get_settings
 from src.core.errors import ApiError, error_body
 from src.movies import router as movies_router
 from src.reporting import router as reporting_router
@@ -59,6 +65,13 @@ _HTTP_EXCEPTION_FALLBACK: tuple[str, str] = (
     "HTTP_ERROR",
     "The request could not be completed.",
 )
+
+# The browser methods and request headers the frontend needs (SPEC-7 D2). A
+# bearer header accompanies authenticated calls and JSON bodies the rest, so no
+# other request header has to be allowed. Credentials stay off: the token is
+# sent as a header, never as a cookie.
+_CORS_ALLOWED_METHODS: tuple[str, ...] = ("GET", "POST", "PATCH", "DELETE", "OPTIONS")
+_CORS_ALLOWED_HEADERS: tuple[str, ...] = ("Authorization", "Content-Type")
 
 
 def _validation_error_message(error: RequestValidationError) -> str:
@@ -183,12 +196,26 @@ def create_app() -> FastAPI:
     """Build the configured FastAPI application (SPEC-2 Section 2.1).
 
     Returns:
-        FastAPI: The application with every router mounted and the four
-        exception handlers installed. A fresh instance is built on every call,
-        so a test can build its own instead of importing the module-level
-        :data:`app`.
+        FastAPI: The application with every router mounted, the CORS middleware
+        installed and the four exception handlers registered. A fresh instance
+        is built on every call, so a test can build its own instead of importing
+        the module-level :data:`app`.
+
+    Raises:
+        pydantic.ValidationError: If the settings cannot be loaded, e.g. an
+            invalid ``CORS_ORIGINS`` entry (SPEC-7 FR-9).
     """
+    settings = get_settings()
     app = FastAPI(title=_APP_TITLE)
+    # Added before the routers so the application is assembled in one go; the
+    # middleware itself only starts wrapping requests once the app is built.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=list(_CORS_ALLOWED_METHODS),
+        allow_headers=list(_CORS_ALLOWED_HEADERS),
+        allow_credentials=False,
+    )
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(movies_router.public_router)
