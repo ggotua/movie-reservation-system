@@ -427,4 +427,31 @@ not import any other `reservations` / `showtimes` / `movies` module. `reservatio
 
 ## Implementation Status
 
-NOT STARTED
+STATUS: IMPLEMENTED AND VERIFIED BY TESTS (2026-10-29)
+
+Delivered (under `backend/`): `src/db/reservation_filters.py` (shared
+effective-status SQL condition, D7) and the SPEC-5 list switched to it;
+`src/reporting/{rules,schemas,service,router}.py`; router wiring in
+`src/main.py`. Tests: unit tests 1-4 in `tests/unit/`, integration tests 5-28 in
+`tests/integration/test_reporting_api.py`, concurrency test 29 in
+`tests/integration/test_reporting_concurrency.py`. Prompts:
+`docs/prompts/PROMPT-6-reporting.md`. No schema change, no new dependency, no
+new setting; no SPEC-2..SPEC-5 endpoint or response shape changed.
+
+Verification evidence (hosted Neon, database `movie_reservation_test`):
+- ruff check clean; `mypy --strict src tests` clean (53 files).
+- Concurrency gate (Section 5.1): `test_reporting_concurrency.py` = 1 passed, in
+  5 consecutive runs (8.7-9.6 s each). No failure, no flaky run.
+- Full suite (SPEC-1 to SPEC-6): 173 passed in 721 s (144 before SPEC-6 + 29
+  new). This includes the whole SPEC-5 suite after the filter refactor.
+- Commit pushed and CI run reported complete by George (GitHub Actions,
+  `postgres:16`).
+
+Known follow-ups (accepted, no code change now):
+- Test helper duplication between the concurrency test files of SPEC-4, SPEC-5
+  and SPEC-6; move them to one shared test module and re-run the concurrency
+  gates.
+- Unused `get_session` in `src/db/engine.py` and its module docstring (SPEC-2
+  follow-up).
+- Architect code review of `reservations/service.py` (hold algorithm) and a
+  manual smoke test with the real server were not performed.
