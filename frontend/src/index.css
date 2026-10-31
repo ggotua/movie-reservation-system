@@ -1,0 +1,190 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+/*
+ * Design tokens — docs/frontend-design-brief.md section 3.
+ * The dark scheme follows the system setting; there is no theme toggle.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Palette: light, "foyer". */
+  --foyer: #edf0f3;
+  --paper: #fbfcfd;
+  --ink: #1d2733;
+  --velvet: #9b1d34;
+  --brass: #a87a1f;
+  --aisle: #b7bfc9;
+
+  /* Text on velvet primary actions: white, per the contrast note. */
+  --on-velvet: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Palette: dark, "house lights down". */
+    --foyer: #17131c;
+    --paper: #221c29;
+    --ink: #ece8f0;
+    --velvet: #d4506b;
+    --brass: #d9a441;
+    --aisle: #4a4455;
+  }
+}
+
+/*
+ * shadcn/ui semantic variables, mapped onto the six palette tokens. They are
+ * declared once and follow the palette through the dark media query above.
+ */
+:root {
+  --background: var(--foyer);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--velvet);
+  --primary-foreground: var(--on-velvet);
+  --secondary: var(--paper);
+  --secondary-foreground: var(--ink);
+  --muted: color-mix(in srgb, var(--aisle) 18%, var(--paper));
+  --muted-foreground: color-mix(in srgb, var(--ink) 72%, var(--paper));
+  --accent: color-mix(in srgb, var(--aisle) 18%, var(--paper));
+  --accent-foreground: var(--ink);
+  --destructive: var(--velvet);
+  --border: var(--aisle);
+  --input: var(--aisle);
+  --ring: var(--ink);
+  --chart-1: var(--velvet);
+  --chart-2: var(--brass);
+  --chart-3: var(--aisle);
+  --chart-4: var(--ink);
+  --chart-5: var(--paper);
+  --radius: 8px;
+  --sidebar: var(--foyer);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--velvet);
+  --sidebar-primary-foreground: var(--on-velvet);
+  --sidebar-accent: color-mix(in srgb, var(--aisle) 18%, var(--paper));
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--aisle);
+  --sidebar-ring: var(--ink);
+}
+
+@theme inline {
+  /* Typefaces: self-hosted Fontsource variable fonts, system sans fallback. */
+  --font-sans:
+    'IBM Plex Sans Variable', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Noto Sans Georgian', sans-serif;
+  --font-display:
+    'Big Shoulders Display Variable', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Noto Sans Georgian', sans-serif;
+  --font-heading: var(--font-display);
+
+  /* Palette utilities: bg-foyer, text-ink, border-aisle, and so on. */
+  --color-foyer: var(--foyer);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-velvet: var(--velvet);
+  --color-brass: var(--brass);
+  --color-aisle: var(--aisle);
+
+  /* shadcn/ui semantic utilities. */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* shadcn/ui radius scale, anchored on the 8 px control radius. */
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.6);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.25);
+  --radius-2xl: calc(var(--radius) * 1.75);
+  --radius-3xl: calc(var(--radius) * 2.5);
+  --radius-4xl: calc(var(--radius) * 3);
+}
+
+@theme {
+  /* Type scale from the brief: 14 / 16 / 18 / 22 / 28 / 40 / 56 px. */
+  --text-1: 0.875rem; /* 14 px */
+  --text-1--line-height: 1.5;
+  --text-2: 1rem; /* 16 px, body */
+  --text-2--line-height: 1.5;
+  --text-3: 1.125rem; /* 18 px */
+  --text-3--line-height: 1.45;
+  --text-4: 1.375rem; /* 22 px */
+  --text-4--line-height: 1.35;
+  --text-5: 1.75rem; /* 28 px */
+  --text-5--line-height: 1.25;
+  --text-6: 2.5rem; /* 40 px */
+  --text-6--line-height: 1.15;
+  --text-7: 3.5rem; /* 56 px */
+  --text-7--line-height: 1.05;
+
+  /* Radius hierarchy: seat, control, stub, poster. */
+  --radius-seat: 10px;
+  --radius-seat-foot: 3px;
+  --radius-control: 8px;
+  --radius-stub: 0px;
+  --radius-poster: 4px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground font-sans text-2;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display font-bold;
+  }
+}
+
+/* Motion answers an action only; with reduced motion every change is instant. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
