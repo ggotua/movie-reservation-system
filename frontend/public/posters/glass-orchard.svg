@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900" role="img" aria-labelledby="title-glass-orchard description-glass-orchard">
+  <title id="title-glass-orchard">Glass Orchard</title>
+  <desc id="description-glass-orchard">Abstract poster for the fictional film Glass Orchard.</desc>
+  <rect width="600" height="900" fill="#17131C" />
+  <text x="48" y="76" font-family="sans-serif" font-size="18" fill="#ECE8F0" letter-spacing="5" opacity="0.75">THRILLER · 117 MIN</text>
+  <g>
+    <g opacity="0.9"><rect x="118" y="277" width="43" height="284" fill="#4A4455" /><rect x="184" y="277" width="43" height="284" fill="#4A4455" /><rect x="250" y="277" width="43" height="284" fill="#4A4455" /><rect x="316" y="277" width="43" height="284" fill="#4A4455" /><rect x="382" y="277" width="43" height="284" fill="#4A4455" /></g>
+    <rect x="231" y="225" width="280" height="294" fill="#D9A441" opacity="0.9" transform="rotate(1 371.0 372.0)" />
+    <circle cx="442" cy="348" r="98" fill="#D9A441" opacity="0.92" />
+    <rect x="153" y="412" width="339" height="230" fill="#4A4455" opacity="0.9" transform="rotate(0 322.5 527.0)" />
+    <g opacity="0.9"><rect x="173" y="195" width="26" height="232" fill="#D4506B" /><rect x="215" y="195" width="26" height="232" fill="#D4506B" /><rect x="257" y="195" width="26" height="232" fill="#D4506B" /><rect x="299" y="195" width="26" height="232" fill="#D4506B" /><rect x="341" y="195" width="26" height="232" fill="#D4506B" /></g>
+  </g>
+  <g>
+    <rect x="48" y="756" width="64" height="4" fill="#D9A441" /><text x="48" y="838" font-family="sans-serif" font-size="56" fill="#FBFCFD">Glass Orchard</text>
+  </g>
+</svg>

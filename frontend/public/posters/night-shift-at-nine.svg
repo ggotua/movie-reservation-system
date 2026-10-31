@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900" role="img" aria-labelledby="title-night-shift-at-nine description-night-shift-at-nine">
+  <title id="title-night-shift-at-nine">Night Shift at Nine</title>
+  <desc id="description-night-shift-at-nine">Abstract poster for the fictional film Night Shift at Nine.</desc>
+  <rect width="600" height="900" fill="#17131C" />
+  <text x="48" y="76" font-family="sans-serif" font-size="18" fill="#ECE8F0" letter-spacing="5" opacity="0.75">COMEDY · 95 MIN</text>
+  <g>
+    <g opacity="0.9"><rect x="268" y="293" width="30" height="291" fill="#D4506B" /><rect x="316" y="293" width="30" height="291" fill="#D4506B" /><rect x="364" y="293" width="30" height="291" fill="#D4506B" /><rect x="412" y="293" width="30" height="291" fill="#D4506B" /></g>
+    <circle cx="299" cy="515" r="113" fill="#4A4455" opacity="0.92" />
+    <rect x="135" y="186" width="336" height="224" fill="#D9A441" opacity="0.9" transform="rotate(10 303.0 298.0)" />
+  </g>
+  <g>
+    <rect x="48" y="768" width="64" height="4" fill="#D9A441" /><text x="48" y="838" font-family="sans-serif" font-size="44" fill="#FBFCFD">Night Shift at Nine</text>
+  </g>
+</svg>

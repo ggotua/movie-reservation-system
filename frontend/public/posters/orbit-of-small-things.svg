@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900" role="img" aria-labelledby="title-orbit-of-small-things description-orbit-of-small-things">
+  <title id="title-orbit-of-small-things">Orbit of Small Things</title>
+  <desc id="description-orbit-of-small-things">Abstract poster for the fictional film Orbit of Small Things.</desc>
+  <rect width="600" height="900" fill="#221C29" />
+  <text x="48" y="76" font-family="sans-serif" font-size="18" fill="#ECE8F0" letter-spacing="5" opacity="0.75">SCI-FI · 108 MIN</text>
+  <g>
+    <rect x="79" y="288" width="321" height="195" fill="#D9A441" opacity="0.9" transform="rotate(3 239.5 385.5)" />
+    <circle cx="422" cy="332" r="96" fill="#D4506B" opacity="0.92" />
+    <g opacity="0.9"><rect x="104" y="291" width="41" height="280" fill="#D9A441" /><rect x="167" y="291" width="41" height="280" fill="#D9A441" /><rect x="230" y="291" width="41" height="280" fill="#D9A441" /><rect x="293" y="291" width="41" height="280" fill="#D9A441" /><rect x="356" y="291" width="41" height="280" fill="#D9A441" /><rect x="419" y="291" width="41" height="280" fill="#D9A441" /></g>
+    <path d="M 78 432 A 145 145 0 0 1 368 432" fill="none" stroke="#ECE8F0" stroke-width="24" stroke-linecap="butt" opacity="0.9" />
+    <g opacity="0.9"><rect x="264" y="290" width="29" height="306" fill="#4A4455" /><rect x="315" y="290" width="29" height="306" fill="#4A4455" /><rect x="366" y="290" width="29" height="306" fill="#4A4455" /><rect x="417" y="290" width="29" height="306" fill="#4A4455" /><rect x="468" y="290" width="29" height="306" fill="#4A4455" /></g>
+  </g>
+  <g>
+    <rect x="48" y="707" width="64" height="4" fill="#D9A441" /><text x="48" y="781" font-family="sans-serif" font-size="48" fill="#FBFCFD">Orbit of Small</text><text x="48" y="838" font-family="sans-serif" font-size="48" fill="#FBFCFD">Things</text>
+  </g>
+</svg>
