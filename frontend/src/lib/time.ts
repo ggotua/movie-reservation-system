@@ -65,6 +65,43 @@ export function formatDay(value: DateInput): string {
 }
 
 /**
+ * Format a calendar day as a short weekday and day of month, for the day strip.
+ *
+ * @param value - A day (`YYYY-MM-DD`) or any instant belonging to that day.
+ * @returns The abbreviated weekday and day number, e.g. `Sat 31`.
+ */
+export function formatDayShort(value: DateInput): string {
+  return new Intl.DateTimeFormat(LOCALE, {
+    timeZone: TIME_ZONE,
+    weekday: 'short',
+    day: 'numeric',
+  }).format(toDate(value))
+}
+
+/**
+ * The calendar day an instant belongs to, in the cinema time zone.
+ *
+ * @param value - An ISO string (as the API sends) or a `Date`.
+ * @returns `YYYY-MM-DD` in `VITE_CINEMA_TIMEZONE`, e.g. `2026-10-31` for
+ *   `2026-10-30T20:30:00Z` when the zone is `Asia/Tbilisi`.
+ */
+export function dayInCinema(value: DateInput): string {
+  const parts = new Intl.DateTimeFormat(LOCALE, {
+    timeZone: TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(toDate(value))
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+  if (year === undefined || month === undefined || day === undefined) {
+    throw new Error(`Could not resolve the date in ${TIME_ZONE}`)
+  }
+  return `${year}-${month}-${day}`
+}
+
+/**
  * Today's calendar day in the cinema time zone, as the API expects it.
  *
  * @param now - The instant to evaluate; defaults to the current time. Tests
@@ -73,19 +110,7 @@ export function formatDay(value: DateInput): string {
  *   which may differ from the browser's day around midnight.
  */
 export function todayInCinema(now: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat(LOCALE, {
-    timeZone: TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now)
-  const year = parts.find((part) => part.type === 'year')?.value
-  const month = parts.find((part) => part.type === 'month')?.value
-  const day = parts.find((part) => part.type === 'day')?.value
-  if (year === undefined || month === undefined || day === undefined) {
-    throw new Error(`Could not resolve the date in ${TIME_ZONE}`)
-  }
-  return `${year}-${month}-${day}`
+  return dayInCinema(now)
 }
 
 /** Matches a calendar day in the API's `YYYY-MM-DD` form. */

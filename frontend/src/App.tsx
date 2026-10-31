@@ -2,10 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
+import { AppShell } from '@/AppShell'
+import { NotFoundPage } from '@/NotFoundPage'
 import { AuthProvider } from '@/features/auth/AuthContext'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RequireAuth } from '@/features/auth/RequireAuth'
 import { SignupPage } from '@/features/auth/SignupPage'
+import { BrowsePage } from '@/features/browse/BrowsePage'
+import { MoviePage } from '@/features/browse/MoviePage'
 
 /** Props of {@link PlaceholderPage}. */
 interface PlaceholderPageProps {
@@ -21,7 +25,11 @@ interface PlaceholderPageProps {
  */
 function PlaceholderPage({ title }: PlaceholderPageProps) {
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-5xl flex-col justify-center gap-4 px-6">
+    <main
+      id="main-content"
+      tabIndex={-1}
+      className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-6 py-10"
+    >
       <h1 className="text-6">{title}</h1>
     </main>
   )
@@ -55,37 +63,33 @@ function App() {
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<PlaceholderPage title="Showtimes" />} />
-            <Route
-              path="/movies/:movieId"
-              element={<PlaceholderPage title="Movie" />}
-            />
-            <Route
-              path="/showtimes/:showtimeId"
-              element={<PlaceholderPage title="Seat map" />}
-            />
-            <Route
-              path="/checkout/:reservationId"
-              element={
-                <RequireAuth>
-                  <PlaceholderPage title="Checkout" />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/reservations"
-              element={
-                <RequireAuth>
-                  <PlaceholderPage title="My reservations" />
-                </RequireAuth>
-              }
-            />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route
-              path="*"
-              element={<PlaceholderPage title="Page not found" />}
-            />
+            <Route element={<AppShell />}>
+              <Route path="/" element={<BrowsePage />} />
+              <Route path="/movies/:movieId" element={<MoviePage />} />
+              <Route
+                path="/showtimes/:showtimeId"
+                element={<PlaceholderPage title="Seat map" />}
+              />
+              <Route
+                path="/checkout/:reservationId"
+                element={
+                  <RequireAuth>
+                    <PlaceholderPage title="Checkout" />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/reservations"
+                element={
+                  <RequireAuth>
+                    <PlaceholderPage title="My reservations" />
+                  </RequireAuth>
+                }
+              />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/signup" element={<SignupPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
           </Routes>
         </AuthProvider>
       </BrowserRouter>

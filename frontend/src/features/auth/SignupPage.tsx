@@ -67,7 +67,11 @@ export function SignupPage() {
     next === null ? '/login' : `/login?next=${encodeURIComponent(next)}`
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-6 px-6 py-10">
+    <main
+      id="main-content"
+      tabIndex={-1}
+      className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-6 px-6 py-10"
+    >
       <h1 className="text-6">Sign up</h1>
 
       <form className="flex flex-col gap-4" noValidate onSubmit={handleSubmit}>

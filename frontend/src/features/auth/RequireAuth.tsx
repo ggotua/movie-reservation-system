@@ -42,7 +42,11 @@ export function RequireAuth({ children }: RequireAuthProps) {
 
   if (isRestoring) {
     return (
-      <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center px-6">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center px-6"
+      >
         <Skeleton className="h-10 w-full" />
       </main>
     )
@@ -50,7 +54,11 @@ export function RequireAuth({ children }: RequireAuthProps) {
 
   if (restoreError !== null) {
     return (
-      <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-4 px-6">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-4 px-6"
+      >
         <Alert variant="destructive">
           <AlertDescription>{messageFromError(restoreError)}</AlertDescription>
         </Alert>
