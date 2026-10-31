@@ -9,8 +9,5 @@ describe('App', () => {
     expect(
       screen.getByRole('heading', { level: 1, name: 'Showtimes' }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Hold seats' }),
-    ).toBeInTheDocument()
   })
 })

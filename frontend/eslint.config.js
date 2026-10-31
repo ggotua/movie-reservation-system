@@ -20,6 +20,14 @@ export default defineConfig([
     },
   },
   {
+    // The auth context file must export both the provider component and the
+    // `useAuth` hook; a hook is not a component, but the two belong together.
+    files: ['src/features/auth/AuthContext.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+  {
     // shadcn/ui components export their style helpers (cva variants) beside the
     // component, as the CLI generates them; fast refresh cannot be preserved
     // for these files, so the rule is off here.
