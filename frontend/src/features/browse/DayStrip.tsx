@@ -28,7 +28,7 @@ export interface DayStripProps {
  */
 export function DayStrip({ days, selectedDay }: DayStripProps) {
   return (
-    <nav aria-label="Choose a day" className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+    <nav aria-label="Choose a day" className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
       <ul className="flex w-max gap-2">
         {days.map((day) => {
           const isSelected = day === selectedDay
@@ -40,7 +40,7 @@ export function DayStrip({ days, selectedDay }: DayStripProps) {
                 className={cn(
                   'flex h-10 min-w-16 items-center justify-center rounded-control border-2 px-3 text-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink',
                   isSelected
-                    ? 'border-ink bg-paper font-semibold uppercase text-ink'
+                    ? 'border-ink bg-paper font-semibold text-ink'
                     : 'border-aisle text-muted-foreground hover:text-ink',
                 )}
               >

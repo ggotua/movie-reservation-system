@@ -8,6 +8,7 @@
 
 import { Link, useParams } from 'react-router-dom'
 
+import { ContentWrapper } from '@/components/layout/content-wrapper'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatDay } from '@/lib/time'
 
@@ -38,18 +39,25 @@ function parseMovieId(value: string | undefined): number | null {
 /**
  * The loading state of the movie page.
  *
- * @returns A skeleton for the poster, title, facts and description.
+ * @returns A skeleton in the loaded page's two-column shape: poster column on
+ *   the left from 768 px, details and showtimes on the right, so the layout does
+ *   not shift when the data arrives.
  */
 function MovieSkeleton() {
   return (
-    <div role="status" className="flex flex-col gap-6">
+    <div
+      role="status"
+      className="flex flex-col gap-6 md:flex-row md:gap-8"
+    >
       <span className="sr-only">Loading movie</span>
-      <div className="flex flex-col gap-6 sm:flex-row">
-        <Skeleton className="aspect-[2/3] w-40 rounded-poster sm:w-56" />
-        <div className="flex flex-1 flex-col gap-3">
-          <Skeleton className="h-10 w-2/3" />
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-24 w-full max-w-[65ch]" />
+      <Skeleton className="aspect-[2/3] w-40 shrink-0 rounded-poster md:w-[280px]" />
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <Skeleton className="h-10 w-2/3" />
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-24 w-full max-w-[65ch]" />
+        <div className="mt-6 flex flex-col gap-4 border-t border-aisle pt-4">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-14 w-full max-w-md" />
         </div>
       </div>
     </div>
@@ -86,26 +94,22 @@ function MovieDetails({ movieId }: MovieDetailsProps) {
   }
 
   return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6"
-    >
-      {isLoading && <MovieSkeleton />}
+    <main id="main-content" tabIndex={-1} className="py-8">
+      <ContentWrapper>
+        {isLoading && <MovieSkeleton />}
 
-      {failure !== null && (
-        <LoadError message={messageForLoadError(failure)} onRetry={retry} />
-      )}
+        {failure !== null && (
+          <LoadError message={messageForLoadError(failure)} onRetry={retry} />
+        )}
 
-      {movie.isSuccess && showtimes.isSuccess && (
-        <>
-          <div className="flex flex-col gap-6 sm:flex-row sm:gap-8">
+        {movie.isSuccess && showtimes.isSuccess && (
+          <div className="flex flex-col gap-6 md:flex-row md:gap-8">
             <MoviePoster
               src={movie.data.poster_url}
               title={movie.data.title}
-              className="w-40 sm:w-56"
+              className="w-40 md:w-[280px]"
             />
-            <div className="flex min-w-0 flex-col gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-3">
               <h1 className="text-6 sm:text-7">{movie.data.title}</h1>
               {movie.data.genres.length > 0 && (
                 <p className="text-1 text-muted-foreground">
@@ -117,46 +121,46 @@ function MovieDetails({ movieId }: MovieDetailsProps) {
                   {movie.data.description}
                 </p>
               )}
+
+              <section aria-labelledby="movie-showtimes" className="mt-6">
+                <h2 id="movie-showtimes" className="text-5">
+                  Showtimes
+                </h2>
+
+                {days.length === 0 ? (
+                  <p className="mt-4 text-2 text-muted-foreground">
+                    No upcoming showtimes for this movie.
+                  </p>
+                ) : (
+                  <div className="mt-4 flex flex-col gap-4">
+                    {days.map(({ day, showtimes: dayShowtimes }) => (
+                      <section
+                        key={day}
+                        aria-labelledby={`showtimes-${day}`}
+                        className="border-t border-aisle pt-3"
+                      >
+                        <h3 id={`showtimes-${day}`} className="text-4">
+                          {formatDay(day)}
+                        </h3>
+                        <ul className="mt-2 flex flex-wrap gap-2">
+                          {dayShowtimes.map((showtime) => (
+                            <li key={showtime.id}>
+                              <ShowtimeCard
+                                showtime={showtime}
+                                now={showtimes.dataUpdatedAt}
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           </div>
-
-          <section aria-labelledby="movie-showtimes" className="mt-10">
-            <h2 id="movie-showtimes" className="text-5">
-              Showtimes
-            </h2>
-
-            {days.length === 0 ? (
-              <p className="mt-4 text-2 text-muted-foreground">
-                No upcoming showtimes for this movie.
-              </p>
-            ) : (
-              <div className="mt-4 flex flex-col gap-6">
-                {days.map(({ day, showtimes: dayShowtimes }) => (
-                  <section
-                    key={day}
-                    aria-labelledby={`showtimes-${day}`}
-                    className="border-t border-aisle pt-4"
-                  >
-                    <h3 id={`showtimes-${day}`} className="text-4">
-                      {formatDay(day)}
-                    </h3>
-                    <ul className="mt-3 flex flex-wrap gap-3">
-                      {dayShowtimes.map((showtime) => (
-                        <li key={showtime.id}>
-                          <ShowtimeCard
-                            showtime={showtime}
-                            now={showtimes.dataUpdatedAt}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-            )}
-          </section>
-        </>
-      )}
+        )}
+      </ContentWrapper>
     </main>
   )
 }

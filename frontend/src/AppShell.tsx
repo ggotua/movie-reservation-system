@@ -10,6 +10,7 @@
 
 import { Link, NavLink, Outlet } from 'react-router-dom'
 
+import { ContentWrapper } from '@/components/layout/content-wrapper'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/features/auth/AuthContext'
 import { cn } from '@/lib/utils'
@@ -52,7 +53,7 @@ export function AppShell() {
       </a>
 
       <header className="border-b border-aisle bg-paper">
-        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-2 sm:px-6">
+        <ContentWrapper className="flex flex-wrap items-center gap-x-6 gap-y-1 py-2">
           <Link
             to="/"
             className="font-display text-4 font-extrabold focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
@@ -99,7 +100,7 @@ export function AppShell() {
               </>
             )}
           </div>
-        </div>
+        </ContentWrapper>
       </header>
 
       <Outlet />

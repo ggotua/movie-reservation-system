@@ -10,6 +10,7 @@
 
 import { Link, useSearchParams } from 'react-router-dom'
 
+import { ContentWrapper } from '@/components/layout/content-wrapper'
 import { Skeleton } from '@/components/ui/skeleton'
 import { dayStrip, formatDay, todayInCinema } from '@/lib/time'
 
@@ -58,21 +59,22 @@ function isCalendarDay(value: string | null): value is string {
 /**
  * The loading state of the movie blocks.
  *
- * @returns Skeleton blocks announced as a status, with the movie count left
- *   deliberately unknown.
+ * @returns Skeleton blocks in the same two-column grid as the loaded page, so
+ *   nothing jumps into place when the showtimes arrive, announced as a status
+ *   with the movie count left deliberately unknown.
  */
 function BrowseSkeleton() {
   return (
     <div
       role="status"
-      className="flex flex-col gap-6 border-t border-aisle pt-6"
+      className="grid gap-x-8 border-t border-aisle lg:grid-cols-2"
     >
       <span className="sr-only">Loading showtimes</span>
-      {[0, 1, 2].map((index) => (
-        <div key={index} className="flex gap-4">
+      {[0, 1, 2, 3].map((index) => (
+        <div key={index} className="flex gap-4 border-b border-aisle py-4">
           <Skeleton className="aspect-[2/3] w-20 rounded-poster sm:w-28" />
-          <div className="flex flex-1 flex-col gap-3">
-            <Skeleton className="h-7 w-52" />
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
+            <Skeleton className="h-7 w-52 max-w-full" />
             <Skeleton className="h-14 w-full max-w-md" />
           </div>
         </div>
@@ -97,75 +99,73 @@ export function BrowsePage() {
   const groups = groupShowtimesByMovie(showtimes.data?.items ?? [])
 
   return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6"
-    >
-      <h1 className="text-6 sm:text-7">{formatDay(selectedDay)}</h1>
+    <main id="main-content" tabIndex={-1} className="py-8">
+      <ContentWrapper>
+        <h1 className="text-6 sm:text-7">{formatDay(selectedDay)}</h1>
 
-      <div className="mt-6">
-        <DayStrip days={days} selectedDay={selectedDay} />
-      </div>
+        <div className="mt-6">
+          <DayStrip days={days} selectedDay={selectedDay} />
+        </div>
 
-      <section aria-labelledby="browse-showtimes" className="mt-8">
-        <h2 id="browse-showtimes" className="sr-only">
-          Showtimes
-        </h2>
+        <section aria-labelledby="browse-showtimes" className="mt-6">
+          <h2 id="browse-showtimes" className="sr-only">
+            Showtimes
+          </h2>
 
-        {showtimes.isPending && <BrowseSkeleton />}
+          {showtimes.isPending && <BrowseSkeleton />}
 
-        {showtimes.isError && (
-          <LoadError
-            message={messageForLoadError(showtimes.error)}
-            onRetry={() => void showtimes.refetch()}
-          />
-        )}
+          {showtimes.isError && (
+            <LoadError
+              message={messageForLoadError(showtimes.error)}
+              onRetry={() => void showtimes.refetch()}
+            />
+          )}
 
-        {showtimes.isSuccess && groups.length === 0 && (
-          <p className="border-t border-aisle pt-6 text-2 text-muted-foreground">
-            No showtimes on this day. Pick another date.
-          </p>
-        )}
+          {showtimes.isSuccess && groups.length === 0 && (
+            <p className="border-t border-aisle pt-4 text-2 text-muted-foreground">
+              No showtimes on this day. Pick another date.
+            </p>
+          )}
 
-        {groups.length > 0 && (
-          <div className="divide-y divide-aisle border-t border-aisle">
-            {groups.map(({ movie, showtimes: movieShowtimes }) => (
-              <section
-                key={movie.id}
-                aria-labelledby={`movie-${movie.id}`}
-                className="flex gap-4 py-6"
-              >
-                <MoviePoster
-                  src={movie.poster_url}
-                  title={movie.title}
-                  className="w-20 sm:w-28"
-                />
-                <div className="flex min-w-0 flex-col gap-3">
-                  <h3 id={`movie-${movie.id}`} className="text-4 sm:text-5">
-                    <Link
-                      to={`/movies/${movie.id}`}
-                      className="hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
-                    >
-                      {movie.title}
-                    </Link>
-                  </h3>
-                  <ul className="flex flex-wrap gap-3">
-                    {movieShowtimes.map((showtime) => (
-                      <li key={showtime.id}>
-                        <ShowtimeCard
-                          showtime={showtime}
-                          now={showtimes.dataUpdatedAt}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
-      </section>
+          {groups.length > 0 && (
+            <div className="grid gap-x-8 border-t border-aisle lg:grid-cols-2">
+              {groups.map(({ movie, showtimes: movieShowtimes }) => (
+                <section
+                  key={movie.id}
+                  aria-labelledby={`movie-${movie.id}`}
+                  className="flex min-w-0 gap-4 border-b border-aisle py-4"
+                >
+                  <MoviePoster
+                    src={movie.poster_url}
+                    title={movie.title}
+                    className="w-20 sm:w-28"
+                  />
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <h3 id={`movie-${movie.id}`} className="text-4 sm:text-5">
+                      <Link
+                        to={`/movies/${movie.id}`}
+                        className="hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
+                      >
+                        {movie.title}
+                      </Link>
+                    </h3>
+                    <ul className="flex flex-wrap gap-2">
+                      {movieShowtimes.map((showtime) => (
+                        <li key={showtime.id}>
+                          <ShowtimeCard
+                            showtime={showtime}
+                            now={showtimes.dataUpdatedAt}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+        </section>
+      </ContentWrapper>
     </main>
   )
 }
