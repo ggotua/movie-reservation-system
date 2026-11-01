@@ -1,5 +1,6 @@
 /**
- * Component tests for the auth flow (SPEC-7 Section 5.1, tests 15-19).
+ * Component tests for the auth flow (SPEC-7 Section 5.1, tests 15-19) and the
+ * logout teardown (test 37).
  *
  * The real `App` is rendered so the router, the query client and the auth
  * provider all take part; only the backend is mocked, with responses shaped
@@ -13,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { User } from '@/api/types'
 import { config } from '@/lib/config'
+import { formatDay, todayInCinema } from '@/lib/time'
 import { clearToken, getToken, setToken } from '@/lib/tokenStorage'
 import { server } from '@/test/server'
 
@@ -82,6 +84,38 @@ function successfulLoginHandler() {
   })
 }
 
+/**
+ * A `GET /reservations` handler for an account with nothing booked.
+ *
+ * @returns The MSW handler.
+ */
+function emptyReservationsHandler() {
+  return http.get(`${BASE_URL}/reservations`, () =>
+    HttpResponse.json({ items: [], total: 0, limit: 10, offset: 0 }),
+  )
+}
+
+/**
+ * A `GET /reservations/{id}` handler that reports a booking the server does not
+ * have.
+ *
+ * @param id - The reservation id the URL asks for.
+ * @returns The MSW handler.
+ */
+function missingReservationHandler(id: number) {
+  return http.get(`${BASE_URL}/reservations/${id}`, () =>
+    HttpResponse.json(
+      {
+        error: {
+          code: 'RESERVATION_NOT_FOUND',
+          message: 'Reservation not found.',
+        },
+      },
+      { status: 404 },
+    ),
+  )
+}
+
 afterEach(() => {
   clearToken()
 })
@@ -92,6 +126,7 @@ describe('auth', () => {
     server.use(
       successfulLoginHandler(),
       http.get(`${BASE_URL}/auth/me`, () => HttpResponse.json(USER)),
+      emptyReservationsHandler(),
     )
 
     renderAt('/login?next=%2Freservations')
@@ -178,6 +213,7 @@ describe('auth', () => {
     server.use(
       successfulLoginHandler(),
       http.get(`${BASE_URL}/auth/me`, () => HttpResponse.json(USER)),
+      missingReservationHandler(5),
     )
 
     renderAt('/checkout/5')
@@ -209,6 +245,7 @@ describe('auth', () => {
         }
         return HttpResponse.json(UNAUTHENTICATED_BODY, { status: 401 })
       }),
+      emptyReservationsHandler(),
     )
 
     setToken(TOKEN_VALUE)
@@ -235,6 +272,49 @@ describe('auth', () => {
     ).toBeInTheDocument()
     expect(getToken()).toBeNull()
     expect(window.location.pathname).toBe('/login')
+  })
+
+  it('logout_clears_session_and_redirects', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get(`${BASE_URL}/auth/me`, () => HttpResponse.json(USER)),
+      // The list is empty; only the session teardown is under test here.
+      emptyReservationsHandler(),
+      // Logging out returns to browsing, which fetches that day's showtimes.
+      http.get(`${BASE_URL}/showtimes`, () =>
+        HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 }),
+      ),
+    )
+
+    setToken(TOKEN_VALUE)
+    renderAt('/reservations')
+
+    expect(
+      await screen.findByRole('heading', {
+        level: 1,
+        name: 'My reservations',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'My reservations' }),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+
+    // The session is gone, the private navigation is gone, and the visitor
+    // lands on the public browse page for today.
+    expect(
+      await screen.findByRole('heading', {
+        level: 1,
+        name: formatDay(todayInCinema()),
+      }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
+    expect(getToken()).toBeNull()
+    expect(
+      screen.queryByRole('link', { name: 'My reservations' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Log in' })).toBeInTheDocument()
   })
 })
 

@@ -10,31 +10,9 @@ import { RequireAuth } from '@/features/auth/RequireAuth'
 import { SignupPage } from '@/features/auth/SignupPage'
 import { BrowsePage } from '@/features/browse/BrowsePage'
 import { MoviePage } from '@/features/browse/MoviePage'
+import { CheckoutPage } from '@/features/reservations/CheckoutPage'
+import { MyReservationsPage } from '@/features/reservations/MyReservationsPage'
 import { SeatMapPage } from '@/features/seats/SeatMapPage'
-
-/** Props of {@link PlaceholderPage}. */
-interface PlaceholderPageProps {
-  /** The screen name, shown as the page's only content. */
-  title: string
-}
-
-/**
- * A heading-only stand-in for a screen that later prompts will build.
- *
- * @param props - The screen name.
- * @returns A minimal page with the given title.
- */
-function PlaceholderPage({ title }: PlaceholderPageProps) {
-  return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-6 py-10"
-    >
-      <h1 className="text-6">{title}</h1>
-    </main>
-  )
-}
 
 /**
  * Build the app's query client.
@@ -72,7 +50,7 @@ function App() {
                 path="/checkout/:reservationId"
                 element={
                   <RequireAuth>
-                    <PlaceholderPage title="Checkout" />
+                    <CheckoutPage />
                   </RequireAuth>
                 }
               />
@@ -80,7 +58,7 @@ function App() {
                 path="/reservations"
                 element={
                   <RequireAuth>
-                    <PlaceholderPage title="My reservations" />
+                    <MyReservationsPage />
                   </RequireAuth>
                 }
               />

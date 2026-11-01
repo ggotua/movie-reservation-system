@@ -344,6 +344,10 @@ describe('hold flow', () => {
         postedBody = await request.json()
         return HttpResponse.json(makeReservation(55, [1, 2]), { status: 201 })
       }),
+      // Checkout opens the reservation the hold created and reads its showtime.
+      http.get(`${BASE_URL}/reservations/55`, () =>
+        HttpResponse.json(makeReservation(55, [1, 2])),
+      ),
     )
 
     renderAt(`/showtimes/${SHOWTIME_ID}`)

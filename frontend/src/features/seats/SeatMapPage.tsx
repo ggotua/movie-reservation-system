@@ -15,7 +15,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { getShowtime } from '@/api/catalog'
 import { ApiError } from '@/api/client'
@@ -94,6 +94,26 @@ type SeatNotice =
   | { kind: 'seats-lost'; seats: Seat[] }
   | { kind: 'message'; text: string }
   | { kind: 'active-hold'; holdId: number | null }
+
+/**
+ * Read the notice a previous screen handed over in the route's history state.
+ *
+ * Checkout sends `Seats released` here after a release (FR-6), so this screen
+ * does not repeat that wording: it shows whatever the caller supplied.
+ *
+ * @param state - `useLocation().state`, i.e. whatever the last navigation set.
+ * @returns The notice to show when this screen mounts, or `null` for none.
+ */
+function noticeFromRouteState(state: unknown): SeatNotice | null {
+  if (typeof state !== 'object' || state === null) {
+    return null
+  }
+  const { notice } = state as { notice?: unknown }
+  if (typeof notice !== 'string' || notice === '') {
+    return null
+  }
+  return { kind: 'message', text: notice }
+}
 
 /** The chosen seats plus the seats a refresh took away, for the message. */
 interface SelectionState {
@@ -335,6 +355,7 @@ interface SeatMapScreenProps {
 function SeatMapScreen({ showtimeId }: SeatMapScreenProps) {
   const { token } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const showtimeQuery = useQuery({
     queryKey: ['showtimes', showtimeId],
     queryFn: () => getShowtime(showtimeId),
@@ -350,7 +371,9 @@ function SeatMapScreen({ showtimeId }: SeatMapScreenProps) {
     seats: [],
     lost: null,
   })
-  const [notice, setNotice] = useState<SeatNotice | null>(null)
+  const [notice, setNotice] = useState<SeatNotice | null>(() =>
+    noticeFromRouteState(location.state),
+  )
   const [isHolding, setIsHolding] = useState(false)
   const [hasStarted, setHasStarted] = useState(false)
   const queryClient = useQueryClient()

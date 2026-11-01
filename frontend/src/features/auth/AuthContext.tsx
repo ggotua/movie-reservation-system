@@ -13,6 +13,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -81,7 +82,13 @@ export interface AuthContextValue {
    *   `VALIDATION_ERROR` (422) when the server rejects the input.
    */
   signup: (credentials: Credentials) => Promise<void>
-  /** Forget the session and go to the login page. */
+  /**
+   * Forget the session and return to browsing.
+   *
+   * The token, the restored account and the whole Query cache go, so nothing
+   * from this session can be shown again, and the visitor lands on the public
+   * browse page (FR-1).
+   */
   logout: () => void
 }
 
@@ -117,7 +124,7 @@ function useCurrentUser(token: string | null) {
  * @param props - The app content to wrap.
  *
  * Non-obvious: the provider must sit inside the router, because a `401
- * UNAUTHENTICATED` navigates to `/login` and because `logout` does too.
+ * UNAUTHENTICATED` navigates to `/login` and because `logout` navigates to `/`.
  */
 export function AuthProvider({ children }: AuthProviderProps) {
   const [token, setTokenState] = useState<string | null>(() => getToken())
@@ -143,11 +150,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const logout = useCallback(() => {
+    // Session data goes first so nothing cached for this account can be reused,
+    // then the token clear and the navigation happen in one transition: batching
+    // them keeps `RequireAuth` from sending the page being left to `/login`
+    // before the visitor arrives at the public browse page.
     clearToken()
-    setTokenState(null)
-    setNotice(null)
     queryClient.clear()
-    navigate('/login', { replace: true })
+    startTransition(() => {
+      setTokenState(null)
+      setNotice(null)
+      navigate('/', { replace: true })
+    })
   }, [navigate, queryClient])
 
   const retryRestore = useCallback(() => {
