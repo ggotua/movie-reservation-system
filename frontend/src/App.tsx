@@ -10,6 +10,7 @@ import { RequireAuth } from '@/features/auth/RequireAuth'
 import { SignupPage } from '@/features/auth/SignupPage'
 import { BrowsePage } from '@/features/browse/BrowsePage'
 import { MoviePage } from '@/features/browse/MoviePage'
+import { SeatMapPage } from '@/features/seats/SeatMapPage'
 
 /** Props of {@link PlaceholderPage}. */
 interface PlaceholderPageProps {
@@ -66,10 +67,7 @@ function App() {
             <Route element={<AppShell />}>
               <Route path="/" element={<BrowsePage />} />
               <Route path="/movies/:movieId" element={<MoviePage />} />
-              <Route
-                path="/showtimes/:showtimeId"
-                element={<PlaceholderPage title="Seat map" />}
-              />
+              <Route path="/showtimes/:showtimeId" element={<SeatMapPage />} />
               <Route
                 path="/checkout/:reservationId"
                 element={
