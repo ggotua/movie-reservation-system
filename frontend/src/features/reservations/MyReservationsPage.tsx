@@ -1,3 +1,4 @@
+
 /**
  * The reservations list (SPEC-7 FR-7, FR-8, FR-14; design brief Section 4).
  *
@@ -253,14 +254,13 @@ export function MyReservationsPage() {
         )}
 
         {page !== undefined && items.length === 0 && (
-          <p className="mt-8 text-2 text-muted-foreground">No bookings to show.</p>
+          <p className="mt-8 text-2 text-muted-foreground">
+            You have no bookings yet. Pick a showtime to get started.
+          </p>
         )}
 
         {items.length > 0 && (
-          <ul
-            aria-label="Reservations"
-            className="mt-6 flex flex-col gap-4"
-          >
+          <ul aria-label="Reservations" className="mt-6 flex flex-col gap-4">
             {items.map((reservation) => (
               <li key={reservation.id}>
                 <ReservationCard

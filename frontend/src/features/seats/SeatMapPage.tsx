@@ -285,12 +285,12 @@ function TicketSummary({
     <div className="lg:sticky lg:top-6">
       <aside
         aria-labelledby="ticket-summary-heading"
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-aisle bg-paper px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] lg:static lg:rounded-control lg:border lg:px-4 lg:py-4 lg:shadow-none"
+        className="fixed inset-x-0 bottom-0 z-20 border-t border-aisle bg-paper px-4 py-3 lg:static lg:rounded-control lg:border lg:px-4 lg:py-4"
       >
         <div className="mx-auto flex max-w-xl flex-col gap-2 lg:max-w-none">
           <h2
             id="ticket-summary-heading"
-            className="hidden text-1 uppercase tracking-[0.08em] text-muted-foreground lg:block"
+            className="hidden text-2 font-medium lg:block"
           >
             Your seats
           </h2>

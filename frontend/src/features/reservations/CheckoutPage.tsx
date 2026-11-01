@@ -219,7 +219,11 @@ function CheckoutScreen({ reservationId }: CheckoutScreenProps) {
   // A hold that has run out is not decided here: one refetch asks the server,
   // and the status it reports is what the screen renders.
   useEffect(() => {
-    if (expiresAt === null || !hasRunOut || refetchedFor.current === expiresAt) {
+    if (
+      expiresAt === null ||
+      !hasRunOut ||
+      refetchedFor.current === expiresAt
+    ) {
       return
     }
     refetchedFor.current = expiresAt
@@ -275,7 +279,16 @@ function CheckoutScreen({ reservationId }: CheckoutScreenProps) {
 
   return (
     <>
-      {reservationQuery.isPending && <CheckoutSkeleton />}
+      {/*
+        The receipt needs the reservation and its showtime, so the placeholder
+        stays until both calls have answered (FR-14). The showtime query is only
+        counted once the reservation has supplied its id, because it is disabled
+        before then.
+      */}
+      {(reservationQuery.isPending ||
+        (showtimeId !== undefined && showtimeQuery.isPending)) && (
+        <CheckoutSkeleton />
+      )}
 
       {failure !== null && (
         <CheckoutFailure message={messageForFailure(failure)} onRetry={retry} />
@@ -403,7 +416,6 @@ function CheckoutScreen({ reservationId }: CheckoutScreenProps) {
               <SettledLinks />
             </div>
           )}
-
         </div>
       )}
     </>
