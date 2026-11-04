@@ -456,4 +456,18 @@ except through shared `api/` or `lib/`.
 
 ## Implementation Status
 
-NOT STARTED
+IMPLEMENTED (2026-11-04)
+
+Evidence:
+- Backend: CORS (FR-9) added; tests 1-4 pass; backend suite 177 passed at that point (173 + 4). Lint, format and mypy --strict clean.
+- Frontend: tests 5-38 pass (names exactly as Section 5.1) plus extra tests for safeNextPath boundaries and one seat-map error state; 40 tests in 13 files. npm run lint, typecheck, test, build all exit 0.
+- CI: both jobs (backend, frontend) green on every commit of this SPEC, latest run CI#21.
+- Manual acceptance (Section 5.3), 13 steps against real running servers: all passed, confirmed by George on 2026-11-04.
+- New dependencies, all pre-approved in Section 8: react-router-dom, @tanstack/react-query, Vitest, React Testing Library, jest-dom, user-event, MSW, ESLint with typescript-eslint, Prettier; plus what shadcn/ui installs (radix-ui, class-variance-authority, lucide-react, tw-animate-css, cn, shadcn) and two Fontsource font packages (Big Shoulders Display, IBM Plex Sans).
+- Decisions D1-D10 implemented as approved.
+
+Notes:
+- Logout lands on / (browse), as specified; a 401 goes to /login with a short notice.
+- Seat map is public; only holding requires a session.
+- The seat-lost rule (FR-4) runs on a query-cache subscription, the one place where polled data is compared with the selection.
+- An unhandled backend 500 has no CORS headers (Starlette's outermost layer), so the browser shows it as a network error; the UI maps that to NETWORK_ERROR.
