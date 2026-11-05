@@ -1,0 +1,33 @@
+# Render blueprint for the backend web service (SPEC-7B D2, FR-2).
+#
+# One free Python web service built from this repository. Secrets are declared
+# with `sync: false`, so Render asks for their values in the dashboard and never
+# reads one from this file: no secret value appears here, in git or in the
+# deployment log. `PYTHON_VERSION` matches `requires-python` in
+# backend/pyproject.toml and the "Set up Python" step of .github/workflows/ci.yml.
+services:
+  - type: web
+    name: movie-reservation-system-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install .
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Production Neon connection string (postgresql+psycopg://...), a fresh
+      # JWT signing key of at least 32 characters and the Cloudflare Pages
+      # origin. Values are entered in the Render dashboard only (SPEC-7B D5).
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      # Not a secret: the cinema's calendar timezone (SPEC-3 D2).
+      - key: CINEMA_TIMEZONE
+        value: Asia/Tbilisi
+      # Not a secret: the interpreter Render installs for this service.
+      - key: PYTHON_VERSION
+        value: "3.13.5"

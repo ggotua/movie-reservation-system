@@ -1,8 +1,9 @@
 """Application factory, global error handling and the server entry point.
 
 This module is the assembly point of the API skeleton (SPEC-2 Section 2.1): it
-builds the FastAPI application, mounts the auth, movie and showtime routers, and
-installs the exception handlers that give every failure the single shape fixed in
+builds the FastAPI application, mounts the health route together with the auth,
+movie, showtime, reservation and reporting routers, and installs the exception
+handlers that give every failure the single shape fixed in
 ``docs/steering/conventions.md`` (SPEC-2 Sections 2.1, 2.9; FR-12).
 
 The database dependency is deliberately not wrapped or overridden here.
@@ -15,7 +16,11 @@ One middleware is installed: Starlette's ``CORSMiddleware``, configured from
 so the error responses built below keep the CORS headers as well as the standard
 error body. Starlette keeps its own ``ServerErrorMiddleware`` outermost, so only
 the unhandled-failure path -- which the handler below already logs -- stays
-outside that wrapper. Nothing else is added: no extra routes.
+outside that wrapper. The one route that belongs to no business module is the
+unauthenticated ``GET /health`` (SPEC-7B D6, FR-1), mounted from
+:mod:`src.health`; it depends on nothing, so the health check answers even while
+the database is unreachable, and the standard error shape of every other route is
+unchanged (SPEC-7B FR-7).
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from src.auth.router import admin_router, auth_router
 from src.core.config import get_settings
 from src.core.errors import ApiError, error_body
+from src.health import router as health_router
 from src.movies import router as movies_router
 from src.reporting import router as reporting_router
 from src.reservations import router as reservations_router
@@ -216,6 +222,7 @@ def create_app() -> FastAPI:
         allow_headers=list(_CORS_ALLOWED_HEADERS),
         allow_credentials=False,
     )
+    app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(movies_router.public_router)
