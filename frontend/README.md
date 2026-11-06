@@ -99,6 +99,10 @@ public in the bundle, so never put a secret in one.
 | `VITE_CURRENCY`        | `GEL`                   | Currency used to format money        |
 | `VITE_CINEMA_TIMEZONE` | `Asia/Tbilisi`          | Time zone all showtimes are shown in |
 
+On a hosted build (Cloudflare Pages, SPEC-7B) these `VITE_*` values are baked
+into the bundle at build time: set them as the host's build variables and
+redeploy to change them. A local `.env` has no effect on a hosted build.
+
 Only `src/lib/config.ts` reads these.
 
 ## Scripts
@@ -120,7 +124,8 @@ frontend/
   package.json  package-lock.json  .nvmrc  index.html  vite.config.ts
   tsconfig.json  tsconfig.app.json  tsconfig.node.json  eslint.config.js
   .prettierrc  components.json  .env.example
-  public/          favicon and the seeded demo posters (/posters/*.svg)
+  public/          favicon, the seeded demo posters (/posters/*.svg) and
+                   _redirects (SPA fallback on Cloudflare Pages)
   src/
     main.tsx  App.tsx             providers (QueryClient, Router, Auth) and routes
     AppShell.tsx  NotFoundPage.tsx  index.css
@@ -128,7 +133,7 @@ frontend/
     features/
       auth/         LoginPage  SignupPage  AuthContext  RequireAuth  authForm
       browse/       BrowsePage  MoviePage  DayStrip  ShowtimeCard  MoviePoster
-                    LoadError  queries  showtimeGroups
+                    LoadError  queries  showtimeGroups  useWakingUpNotice
       seats/        SeatMapPage  SeatGrid  seatSelection
       reservations/ CheckoutPage  MyReservationsPage  ReservationCard
     components/

@@ -6,10 +6,10 @@
  * only the backend is mocked, with responses shaped like the backend schemas.
  */
 
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { HttpResponse, http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { HttpResponse, delay, http } from 'msw'
+import { describe, expect, it, vi } from 'vitest'
 
 import type {
   Movie,
@@ -181,7 +181,9 @@ describe('browse', () => {
       within(harbour).queryByText(formatShowtime(longQuietEarly.starts_at)),
     ).toBeNull()
 
-    await user.click(screen.getByRole('link', { name: formatDayShort(TOMORROW) }))
+    await user.click(
+      screen.getByRole('link', { name: formatDayShort(TOMORROW) }),
+    )
 
     expect(
       await screen.findByRole('heading', {
@@ -196,9 +198,7 @@ describe('browse', () => {
     expect(
       await screen.findByRole('region', { name: HARBOUR_LIGHTS.title }),
     ).toBeInTheDocument()
-    expect(
-      screen.queryByRole('region', { name: LONG_QUIET.title }),
-    ).toBeNull()
+    expect(screen.queryByRole('region', { name: LONG_QUIET.title })).toBeNull()
   })
 
   it('browse_empty_day_and_error_with_retry', async () => {
@@ -240,7 +240,9 @@ describe('browse', () => {
     ).toBeInTheDocument()
 
     failTomorrow = true
-    await user.click(screen.getByRole('link', { name: formatDayShort(TOMORROW) }))
+    await user.click(
+      screen.getByRole('link', { name: formatDayShort(TOMORROW) }),
+    )
 
     expect(
       await screen.findByText('Something went wrong on our side. Try again.'),
@@ -255,6 +257,94 @@ describe('browse', () => {
     expect(
       screen.queryByText('Something went wrong on our side. Try again.'),
     ).toBeNull()
+  })
+
+  it('browse_shows_waking_up_notice_after_four_seconds_and_hides_it', async () => {
+    // The notice and MSW's delayed response both ride on `setTimeout`, so only
+    // the timers are faked: advancing the clock drives the whole sequence, and
+    // the test never waits four real seconds.
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'],
+    })
+
+    try {
+      const harbourToday = makeShowtime({
+        id: 201,
+        startsAt: `${TODAY}T14:00:00Z`,
+        priceCents: 1000,
+        movie: HARBOUR_LIGHTS,
+        screen: SCREEN_TWO,
+      })
+      const notice = 'Waking up the server. This can take up to a minute.'
+      // The second mount is the failure case; the first one succeeds.
+      let shouldFail = false
+
+      /**
+       * Move the fake clock forward and let React and TanStack Query settle.
+       *
+       * @param milliseconds - How far to advance the fake clock.
+       */
+      const advanceBy = async (milliseconds: number): Promise<void> => {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(milliseconds)
+        })
+      }
+
+      server.use(
+        http.get(`${BASE_URL}/showtimes`, async () => {
+          // The server sleeps: every answer takes longer than the notice delay.
+          await delay(5000)
+          if (shouldFail) {
+            return HttpResponse.json(
+              {
+                error: {
+                  code: 'INTERNAL_ERROR',
+                  message: 'The server failed.',
+                },
+              },
+              { status: 500 },
+            )
+          }
+          return HttpResponse.json(showtimePage([harbourToday]))
+        }),
+      )
+
+      const firstMount = renderAt('/')
+
+      // At 3.9 s the request is still pending but the notice is not due yet.
+      await advanceBy(3900)
+      expect(screen.queryByText(notice)).toBeNull()
+
+      // At 4.1 s the wait is admitted, in a politely announced region.
+      await advanceBy(200)
+      expect(screen.getByText(notice)).toHaveAttribute('role', 'status')
+
+      // The data arrives: the notice goes away with the loading state.
+      await advanceBy(1000)
+      expect(
+        screen.getByRole('region', { name: HARBOUR_LIGHTS.title }),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(notice)).toBeNull()
+
+      // A failed request behaves the same way: the notice shows, then goes.
+      firstMount.unmount()
+      shouldFail = true
+      renderAt('/')
+
+      await advanceBy(3900)
+      expect(screen.queryByText(notice)).toBeNull()
+
+      await advanceBy(200)
+      expect(screen.getByText(notice)).toBeInTheDocument()
+
+      await advanceBy(1000)
+      expect(
+        screen.getByText('Something went wrong on our side. Try again.'),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(notice)).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

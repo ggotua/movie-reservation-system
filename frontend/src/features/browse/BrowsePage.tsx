@@ -17,12 +17,10 @@ import { dayStrip, formatDay, todayInCinema } from '@/lib/time'
 import { DayStrip } from './DayStrip'
 import { LoadError } from './LoadError'
 import { MoviePoster } from './MoviePoster'
-import {
-  messageForLoadError,
-  useDayShowtimes,
-} from './queries'
+import { messageForLoadError, useDayShowtimes } from './queries'
 import { groupShowtimesByMovie } from './showtimeGroups'
 import { ShowtimeCard } from './ShowtimeCard'
+import { WAKING_UP_NOTICE_TEXT, useWakingUpNotice } from './useWakingUpNotice'
 
 /** How many days the strip offers, today included. */
 const STRIP_DAYS = 14
@@ -97,6 +95,7 @@ export function BrowsePage() {
   const selectedDay = isCalendarDay(requestedDay) ? requestedDay : today
   const showtimes = useDayShowtimes(selectedDay)
   const groups = groupShowtimesByMovie(showtimes.data?.items ?? [])
+  const wakingUp = useWakingUpNotice(showtimes.isPending)
 
   return (
     <main id="main-content" tabIndex={-1} className="py-8">
@@ -112,7 +111,16 @@ export function BrowsePage() {
             Showtimes
           </h2>
 
-          {showtimes.isPending && <BrowseSkeleton />}
+          {showtimes.isPending && (
+            <>
+              <BrowseSkeleton />
+              {wakingUp && (
+                <p role="status" className="mt-4 text-2 text-muted-foreground">
+                  {WAKING_UP_NOTICE_TEXT}
+                </p>
+              )}
+            </>
+          )}
 
           {showtimes.isError && (
             <LoadError
